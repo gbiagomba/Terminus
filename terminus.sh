@@ -39,15 +39,15 @@ mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrk
 
 # Going through urls and trying to download them
 for URL in $(cat $links); do
-	curl -o /dev/null --silent --head --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_HEAD_output.txt &
-	curl -o /dev/null --silent --get --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_GET_output.txt  &
-	curl -o /dev/null --silent -X TRACE --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_TRACE_output.txt  &
-	curl -o /dev/null --silent -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_POST_output.txt &
-	curl -o /dev/null --silent -X PUT -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_PUT_output.txt &
-	curl -o /dev/null --silent -X DELETE --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_DELETE_output.txt &
-	curl -o /dev/null --silent -X PATCH --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_PATCH_output.txt &
-	curl -o /dev/null --silent -X OPTIONS --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_OPTIONS_output.txt &
-	curl -o /dev/null --silent -X CONNECT --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_CONNECT_output.txt &
+	curl -o /dev/null --silent --head --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_HEAD_output.txt &
+	curl -o /dev/null --silent --get --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_GET_output.txt  &
+	curl -o /dev/null --silent -X TRACE --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_TRACE_output.txt  &
+	curl -o /dev/null --silent -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_POST_output.txt &
+	curl -o /dev/null --silent -X PUT -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_PUT_output.txt &
+	curl -o /dev/null --silent -X DELETE --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_DELETE_output.txt &
+	curl -o /dev/null --silent -X PATCH --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_PATCH_output.txt &
+	curl -o /dev/null --silent -X OPTIONS --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_OPTIONS_output.txt &
+	curl -o /dev/null --silent -X CONNECT --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_CONNECT_output.txt &
 	while pgrep -x curl > /dev/null; do sleep 10; done
 done
 
@@ -70,7 +70,7 @@ eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --web --threads 25 --prepend-https -
 
 for URL in $(cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2);do
 	wget -bpk $URL 2> /dev/null
-	cutycapt --url=$URL --out=$wrkpth/Screenshots/			$URL.jpg --insecure --max-wait=1000  2> /dev/null &
+	cutycapt --url=$URL --out=$wrkpth/Screenshots/$URL.jpg --insecure --max-wait=1000  2> /dev/null &
 	wait
 done
 
