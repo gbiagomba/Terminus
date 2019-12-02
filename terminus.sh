@@ -25,7 +25,7 @@ wrkpth="$pth/$TodaysYEAR/$TodaysDAY"
 
 # Capturing file from user
 links=$1
-if [ -r $links ]; then
+if [ ! -r $links ]; then
     echo file does not exist, please enter a valid filename
     echo usage 'terminus.sh links.txt'
     exit
@@ -35,7 +35,7 @@ echo What is the project name?
 read Prj_name
 
 # Stting up workspace
-mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/
+mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrkpth/Screenshots/
 
 # Going through urls and trying to download them
 for URL in $(cat $links); do
@@ -48,7 +48,7 @@ for URL in $(cat $links); do
 	curl -o /dev/null --silent -X PATCH --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_PATCH_output.txt &
 	curl -o /dev/null --silent -X OPTIONS --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_OPTIONS_output.txt &
 	curl -o /dev/null --silent -X CONNECT --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP_CONNECT_output.txt &
-	wait
+	while pgrep -x curl > /dev/null; do sleep 10; done
 done
 
 # Parsing the output from the previous step
@@ -70,7 +70,7 @@ eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --web --threads 25 --prepend-https -
 
 for URL in $(cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2);do
 	wget -bpk $URL 2> /dev/null
-	cutycapt --url=$URL --out=$URL.jpg --insecure --max-wait=1000  2> /dev/null &
+	cutycapt --url=$URL --out=$wrkpth/Screenshots/			$URL.jpg --insecure --max-wait=1000  2> /dev/null &
 	wait
 done
 

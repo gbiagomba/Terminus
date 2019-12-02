@@ -5,6 +5,6 @@ This script was named after the roman god who protected boundary markers. The sc
 I built this under the assumption that you ran an authenticated spider scan/crawl of the target web application or site using something like burp, acunetix or your web browser (see developer features of your browser). Then copy those links and put them in a text file. Now point the script to the file.
 
 ## Usage
-'''
-terminus urls.txt
-'''
+```
+terminus.sh urls.txt
+```
