@@ -76,7 +76,8 @@ done
 
 # Zipping up findings
 cd $pth
-zip -ru -9 $Prj_name-terminus.zip $wrkpth/*
+zip -ru9 $pth/$prj_name-$TodaysYEAR.zip $pth/$TodaysYEAR
+# zip -ru -9 $Prj_name-terminus.zip $wrkpth/*
 
 # Empty file cleanup
 find $wrkpth/ -size 0c -type f -exec rm -rf {} \;
