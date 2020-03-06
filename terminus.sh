@@ -39,15 +39,9 @@ mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrk
 
 # Going through urls and trying to download them
 for URL in $(cat $links); do
-	curl -o /dev/null --silent --head --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_HEAD_output.txt &
-	curl -o /dev/null --silent --get --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_GET_output.txt  &
-	curl -o /dev/null --silent -X TRACE --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_TRACE_output.txt  &
-	curl -o /dev/null --silent -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_POST_output.txt &
-	curl -o /dev/null --silent -X PUT -H "Content-Type: application/x-www-form-urlencoded" -d "param1=value1&param2=value2" --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_PUT_output.txt &
-	curl -o /dev/null --silent -X DELETE --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_DELETE_output.txt &
-	curl -o /dev/null --silent -X PATCH --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_PATCH_output.txt &
-	curl -o /dev/null --silent -X OPTIONS --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_OPTIONS_output.txt &
-	curl -o /dev/null --silent -X CONNECT --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL.png | tee -a $wrkpth/OUTPUT/HTTP_CONNECT_output.txt &
+	for webservmethod in GET POST PUT TRACE CONNECT OPTIONS PROPFIND DELETE HEAD PATCH; do
+		curl -k -L -o /dev/null --silent -X $webservmethod --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL-$webservmethod.png | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
+	done
 	while pgrep -x curl > /dev/null; do sleep 10; done
 done
 
@@ -66,7 +60,7 @@ cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/PARSED/HTTP_Combine
 # Fetching Successful downloadeds
 cd $wrkpth/EVIDENCE
 
-eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --web --threads 25 --prepend-https --cycle all --no-prompt --resolve -d $wrkpth/EyeWitness/
+eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
 
 for URL in $(cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2);do
 	wget -bpk $URL 2> /dev/null
