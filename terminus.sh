@@ -52,20 +52,11 @@ for i in `ls $wrkpth/OUTPUT/`; do
 	done
 done
 cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/OUTPUT/HTTP_Combined
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "000 " | sort > $wrkpth/PARSED/HTTP_Code_DISCONNECT
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "200 " | sort > $wrkpth/PARSED/HTTP_Code_OK
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "301 " | sort > $wrkpth/PARSED/HTTP_Code_MOVED
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "400 " | sort > $wrkpth/PARSED/HTTP_Code_BADREQ
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "401 " | sort > $wrkpth/PARSED/HTTP_Code_UNAUTH
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "404 " | sort > $wrkpth/PARSED/HTTP_Code_NOTFOUND
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "405 " | sort > $wrkpth/PARSED/HTTP_Code_NOTALLOWED
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "411 " | sort > $wrkpth/PARSED/HTTP_Code_LNREQ
-# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "502 " | sort > $wrkpth/PARSED/HTTP_Code_BADGATE
 
 # Fetching Successful downloadeds
-eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
+eyewitness -f "$wrkpth/PARSED/HTTP_Code_200" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
 
-for URL in `cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2`;do
+for URL in `cat $wrkpth/PARSED/HTTP_Code_200 | cut -d " " -f 2`;do
 	wget -bpk $URL 2> /dev/null
 	cutycapt --url=$URL --out=$wrkpth/Screenshots/$URL.jpg --insecure --max-wait=1000  2> /dev/null &
 	while pgrep -x curl > /dev/null; do sleep 10; done
