@@ -39,42 +39,44 @@ mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrk
 
 # Going through urls and trying to download them
 for URL in $(cat $links); do
-	for webservmethod in GET POST PUT TRACE CONNECT OPTIONS PROPFIND DELETE HEAD PATCH; do
+	for webservmethod in GET POST PUT TRACE CONNECT OPTIONS PROPFIND DELETE HEAD PATCH SEARCH; do
 		curl -k -L -o /dev/null --silent -X $webservmethod --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL-$webservmethod.png | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
 	done
 	while pgrep -x curl > /dev/null; do sleep 10; done
 done
 
 # Parsing the output from the previous step
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "000 " | sort > $wrkpth/PARSED/HTTP_Code_DISCONNECT
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "200 " | sort > $wrkpth/PARSED/HTTP_Code_OK
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "301 " | sort > $wrkpth/PARSED/HTTP_Code_MOVED
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "400 " | sort > $wrkpth/PARSED/HTTP_Code_BADREQ
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "401 " | sort > $wrkpth/PARSED/HTTP_Code_UNAUTH
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "404 " | sort > $wrkpth/PARSED/HTTP_Code_NOTFOUND
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "405 " | sort > $wrkpth/PARSED/HTTP_Code_NOTALLOWED
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "411 " | sort > $wrkpth/PARSED/HTTP_Code_LNREQ
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "502 " | sort > $wrkpth/PARSED/HTTP_Code_BADGATE
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/PARSED/HTTP_Combined
+for i in `ls $wrkpth/OUTPUT/`; do
+	for j in 000 200 301 400 401 404 405 411 502; do
+		cat $i | grep $j | sort | >> $wrkpth/PARSED/HTTP_Code_$j 
+	done
+done
+cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/OUTPUT/HTTP_Combined
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "000 " | sort > $wrkpth/PARSED/HTTP_Code_DISCONNECT
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "200 " | sort > $wrkpth/PARSED/HTTP_Code_OK
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "301 " | sort > $wrkpth/PARSED/HTTP_Code_MOVED
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "400 " | sort > $wrkpth/PARSED/HTTP_Code_BADREQ
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "401 " | sort > $wrkpth/PARSED/HTTP_Code_UNAUTH
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "404 " | sort > $wrkpth/PARSED/HTTP_Code_NOTFOUND
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "405 " | sort > $wrkpth/PARSED/HTTP_Code_NOTALLOWED
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "411 " | sort > $wrkpth/PARSED/HTTP_Code_LNREQ
+# cat $wrkpth/OUTPUT/HTTP_*_output.txt | grep "502 " | sort > $wrkpth/PARSED/HTTP_Code_BADGATE
 
 # Fetching Successful downloadeds
-cd $wrkpth/EVIDENCE
-
 eyewitness -f "$wrkpth/PARSED/HTTP_Code_OK" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
 
-for URL in $(cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2);do
+for URL in `cat $wrkpth/PARSED/HTTP_Code_OK | cut -d " " -f 2`;do
 	wget -bpk $URL 2> /dev/null
 	cutycapt --url=$URL --out=$wrkpth/Screenshots/$URL.jpg --insecure --max-wait=1000  2> /dev/null &
-	wait
+	while pgrep -x curl > /dev/null; do sleep 10; done
 done
 
 # Zipping up findings
 cd $pth
 zip -ru9 $pth/$prj_name-$TodaysYEAR.zip $pth/$TodaysYEAR
-# zip -ru -9 $Prj_name-terminus.zip $wrkpth/*
 
 # Empty file cleanup
-find $wrkpth/ -size 0c -type f -exec rm -rf {} \;
+find $wrkpth -type d,f -empty | xargs rm -rf
 
 # Uninitializing variables
 unset pth
