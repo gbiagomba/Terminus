@@ -11,68 +11,62 @@
 # set -eux
 trap "echo Booh!" SIGINT SIGTERM
 
-# Checking if the user is root
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
-
 # declaring variable
-pth=$(pwd)
-TodaysDAY=$(date +%m-%d)
-TodaysYEAR=$(date +%Y)
-wrkpth="$pth/$TodaysYEAR/$TodaysDAY"
-
-# Capturing file from user
+current_time=$(date "+%Y.%m.%d-%H.%M.%S")
 links=$1
+Prj_name=$2
+pth=$(pwd)
+wrkpth="$PWD/terminus"
+
 if [ ! -r $links ]; then
     echo file does not exist, please enter a valid filename
     echo usage 'terminus.sh links.txt'
     exit
+elif [ -z $Prj_name ]; then
+	echo What is the project name?
+	read Prj_name
 fi
 
-echo What is the project name?
-read Prj_name
+{
+	# Stting up workspace
+	mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrkpth/Screenshots/ $wrkpth/Aquatone/
 
-# Stting up workspace
-mkdir -p $wrkpth/OUTPUT $wrkpth/PARSED $wrkpth/EVIDENCE $wrkpth/EyeWitness/ $wrkpth/Screenshots/
-
-# Going through urls and trying to download them
-for URL in $(cat $links); do
-	for webservmethod in ACL BASELINE-CONTROL BCOPY BDELETE BMOVE BPROPFIND BPROPPATCH CHECKIN CHECKOUT CONNECT COPY DEBUG DELETE GET HEAD INDEX LABEL LOCK MERGE MKACTIVITY MKCOL MKWORKSPACE MOVE NOTIFY OPTIONS ORDERPATCH PATCH POLL POST PROPFIND PROPPATCH PUT REPORT RPC_IN_DATA RPC_OUT_DATA SEARCH SUBSCRIBE TRACE UNCHECKOUT UNLOCK UNSUBSCRIBE UPDATE VERSION-CONTROL X-MS-ENUMATTS; do
-		curl -kLs --max-time 10 -X $webservmethod --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL-$webservmethod.png | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
+	# Going through urls and trying to download them
+	for URL in $(cat $links); do
+		for webservmethod in ACL BASELINE-CONTROL BCOPY BDELETE BMOVE BPROPFIND BPROPPATCH CHECKIN CHECKOUT CONNECT COPY DEBUG DELETE GET HEAD INDEX LABEL LOCK MERGE MKACTIVITY MKCOL MKWORKSPACE MOVE NOTIFY OPTIONS ORDERPATCH PATCH POLL POST PROPFIND PROPPATCH PUT REPORT RPC_IN_DATA RPC_OUT_DATA SEARCH SUBSCRIBE TRACE UNCHECKOUT UNLOCK UNSUBSCRIBE UPDATE VERSION-CONTROL X-MS-ENUMATTS; do
+			curl -kLs --max-time 3 -X $webservmethod --write-out "%{http_code} $URL\n" "$URL" -o $wrkpth/Screenshots/$URL-$webservmethod.png | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
+		done
+		while pgrep -x curl > /dev/null; do sleep 10; done
 	done
-	while pgrep -x curl > /dev/null; do sleep 10; done
-done
 
-# Parsing the output from the previous step
-for i in `ls $wrkpth/OUTPUT/`; do
-	for j in 000 200 301 400 401 404 405 411 502; do
-		cat $i | grep $j | sort | >> $wrkpth/PARSED/HTTP_Code_$j 
+	# Parsing the output from the previous step
+	for i in `ls $wrkpth/OUTPUT/`; do
+		for j in 000 200 301 400 401 404 405 411 502; do
+			cat $i | grep $j | sort | >> $wrkpth/PARSED/HTTP_Code_$j
+		done
 	done
-done
-cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/OUTPUT/HTTP_Combined
+	cat $wrkpth/OUTPUT/HTTP_*_output.txt | sort | uniq > $wrkpth/OUTPUT/HTTP_Combined
 
-# Fetching Successful downloadeds
-eyewitness -f "$wrkpth/PARSED/HTTP_Code_200" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
+	# Fetching Successful downloadeds
+	eyewitness -f "$wrkpth/PARSED/HTTP_Code_200" --prepend-https --threads 25 --no-prompt --resolve -d $wrkpth/EyeWitness/
+	cat $wrkpth/PARSED/HTTP_Code_200 | aquaton -threads 10 -out $wrkpth/Aquatone/
 
-for URL in `cat $wrkpth/PARSED/HTTP_Code_200 | cut -d " " -f 2`;do
-	wget -bpk $URL 2> /dev/null
-	cutycapt --url=$URL --out=$wrkpth/Screenshots/$URL.jpg --insecure --max-wait=1000  2> /dev/null &
-	while pgrep -x curl > /dev/null; do sleep 10; done
-done
+	for URL in `cat $wrkpth/PARSED/HTTP_Code_200 | cut -d " " -f 2`;do
+		wget -bpk $URL 2> /dev/null
+		cutycapt --url=$URL --out=$wrkpth/Screenshots/$URL.jpg --insecure --max-wait=1000  2> /dev/null &
+		while pgrep -x curl > /dev/null; do sleep 10; done
+	done
 
-# Zipping up findings
-cd $pth
-zip -ru9 $pth/$prj_name-$TodaysYEAR.zip $pth/$TodaysYEAR
+	# Empty file cleanup
+	for i in d f; do find $wrkpth -type $i -empty | xargs rm -rf; done
 
-# Empty file cleanup
-find $wrkpth -type d,f -empty | xargs rm -rf
+	# Zipping up findings
+	cd $pth
+	zip -ru9 $pth/$prj_name-terminus_output-$current_time.zip $wrkpth/
+} 2> /dev/null | tee -a $pth/$prj_name-terminus_output-$current_time.txt
 
 # Uninitializing variables
 unset pth
-unset TodaysDAY
-unset TodaysYEAR
 unset URL
 unset wrkpth
 set -u
