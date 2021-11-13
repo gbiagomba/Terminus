@@ -35,7 +35,7 @@ fi
 	echo "Going through urls and trying to download them"
 	for URL in $(cat $links); do
 		for webservmethod in ACL BASELINE-CONTROL BCOPY BDELETE BMOVE BPROPFIND BPROPPATCH CHECKIN CHECKOUT CONNECT COPY DEBUG DELETE GET HEAD INDEX LABEL LOCK MERGE MKACTIVITY MKCOL MKWORKSPACE MOVE NOTIFY OPTIONS ORDERPATCH PATCH POLL POST PROPFIND PROPPATCH PUT REPORT RPC_IN_DATA RPC_OUT_DATA SEARCH SUBSCRIBE TRACE UNCHECKOUT UNLOCK UNSUBSCRIBE UPDATE VERSION-CONTROL X-MS-ENUMATTS; do
-			curl -kLs --max-time 3 -X $webservmethod --write-out "%{http_code} $URL\n" "$URL" | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
+			curl -kLs --max-time 3 -X $webservmethod --write-out "%{http_code} $URL\n"  -o /dev/null "$URL" | tee -a $wrkpth/OUTPUT/HTTP-$webservmethod-output.txt &
 		done
 		while pgrep -x curl > /dev/null; do sleep 10; done
 	done
