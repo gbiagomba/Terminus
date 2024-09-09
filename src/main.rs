@@ -1,23 +1,24 @@
+use anyhow::{Context, Result};
 use clap::{Arg, Command};
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, ClientBuilder};
 use reqwest::Method;
-use std::fs;
 use std::fs::File;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process;
 
+// Constants for HTTP methods
 const HTTP_METHODS: &[&str] = &[
-    "ACL", "BASELINE-CONTROL", "BCOPY", "BDELETE", "BMOVE", "BPROPFIND", "BPROPPATCH", 
-    "CHECKIN", "CHECKOUT", "CONNECT", "COPY", "DEBUG", "DELETE", "GET", "HEAD", 
-    "INDEX", "LABEL", "LOCK", "MERGE", "MKACTIVITY", "MKCOL", "MKWORKSPACE", 
-    "MOVE", "NOTIFY", "OPTIONS", "ORDERPATCH", "PATCH", "POLL", "POST", 
-    "PROPFIND", "PROPPATCH", "PUT", "REPORT", "RPC_IN_DATA", "RPC_OUT_DATA", 
-    "SEARCH", "SUBSCRIBE", "TRACE", "UNCHECKOUT", "UNLOCK", "UNSUBSCRIBE", 
+    "ACL", "BASELINE-CONTROL", "BCOPY", "BDELETE", "BMOVE", "BPROPFIND", "BPROPPATCH",
+    "CHECKIN", "CHECKOUT", "CONNECT", "COPY", "DEBUG", "DELETE", "GET", "HEAD",
+    "INDEX", "LABEL", "LOCK", "MERGE", "MKACTIVITY", "MKCOL", "MKWORKSPACE",
+    "MOVE", "NOTIFY", "OPTIONS", "ORDERPATCH", "PATCH", "POLL", "POST",
+    "PROPFIND", "PROPPATCH", "PUT", "REPORT", "RPC_IN_DATA", "RPC_OUT_DATA",
+    "SEARCH", "SUBSCRIBE", "TRACE", "UNCHECKOUT", "UNLOCK", "UNSUBSCRIBE",
     "UPDATE", "VERSION-CONTROL", "X-MS-ENUMATTS"
 ];
 
-fn main() {
+fn main() -> Result<()> {
     let matches = Command::new("Terminus")
         .version("1.0")
         .about("Checks if URLs can be accessed without authentication using various HTTP methods.")
@@ -34,8 +35,8 @@ fn main() {
         .arg(Arg::new("output")
             .short('o')
             .long("output")
-            .value_name("DIR")
-            .help("Specify the output directory for the results"))
+            .value_name("FILE")
+            .help("Specify the output file for the results"))
         .arg(Arg::new("port")
             .short('p')
             .long("port")
@@ -46,50 +47,63 @@ fn main() {
             .long("method")
             .value_name("METHOD")
             .help("Specify the HTTP method to use (default: GET). Use 'ALL' to test all methods"))
+        .arg(Arg::new("follow")
+            .short('L')
+            .long("follow")
+            .help("Follow HTTP redirects"))
         .get_matches();
 
-    let client = Client::new();
-    let default_output_dir = String::from("./terminus_results");
-    let output_dir = matches.get_one::<String>("output").unwrap_or(&default_output_dir);
-    fs::create_dir_all(output_dir).expect("Failed to create output directory");
+    let client = build_client(matches.contains_id("follow"));
+    let default_output_file = "output.txt".to_string();
+    let output_file = matches.get_one::<String>("output").unwrap_or(&default_output_file);
     let port = matches.get_one::<String>("port").and_then(|p| p.parse::<u16>().ok());
-    let default_method = String::from("GET");
+    let default_method = "GET".to_string();
     let method = matches.get_one::<String>("method").unwrap_or(&default_method);
 
     if let Some(url) = matches.get_one::<String>("url") {
-        process_url(&client, url, method, port, output_dir);
+        process_url(&client, url, method, port, output_file)?;
     } else if let Some(file) = matches.get_one::<String>("file") {
-        process_file(&client, file, method, port, output_dir);
+        process_file(&client, file, method, port, output_file)?;
     } else {
         eprintln!("You must provide a URL (-u) or a file (-f) to check.");
         process::exit(1);
     }
+
+    Ok(())
 }
 
-fn process_url(client: &Client, url: &str, method: &str, port: Option<u16>, output_dir: &str) {
+fn build_client(follow_redirects: bool) -> Client {
+    ClientBuilder::new()
+        .redirect(if follow_redirects {
+            reqwest::redirect::Policy::limited(10)
+        } else {
+            reqwest::redirect::Policy::none()
+        })
+        .build()
+        .unwrap()
+}
+
+fn process_url(client: &Client, url: &str, method: &str, port: Option<u16>, output_file: &str) -> Result<()> {
     if method == "ALL" {
         for &http_method in HTTP_METHODS {
-            check_url(&client, url, http_method, port, output_dir);
+            check_url(client, url, http_method, port, output_file)?;
         }
     } else {
-        check_url(&client, url, method, port, output_dir);
+        check_url(client, url, method, port, output_file)?;
     }
+    Ok(())
 }
 
-fn process_file(client: &Client, file_path: &str, method: &str, port: Option<u16>, output_dir: &str) {
-    if let Ok(lines) = read_lines(file_path) {
-        for line in lines {
-            if let Ok(url) = line {
-                process_url(client, &url, method, port, output_dir);
-            }
-        }
-    } else {
-        eprintln!("Could not read file: {}", file_path);
-        process::exit(1);
+fn process_file(client: &Client, file_path: &str, method: &str, port: Option<u16>, output_file: &str) -> Result<()> {
+    let lines = read_lines(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
+    for line in lines {
+        let url = line?;
+        process_url(client, &url, method, port, output_file)?;
     }
+    Ok(())
 }
 
-fn check_url(client: &Client, url: &str, method: &str, port: Option<u16>, output_dir: &str) -> Result<(), reqwest::Error> {
+fn check_url(client: &Client, url: &str, method: &str, port: Option<u16>, output_file: &str) -> Result<()> {
     let full_url = if let Some(p) = port {
         format!("{}:{}", url, p)
     } else {
@@ -99,12 +113,12 @@ fn check_url(client: &Client, url: &str, method: &str, port: Option<u16>, output
     let req_method = Method::from_bytes(method.as_bytes()).unwrap_or(Method::GET);
     let response = client.request(req_method.clone(), &full_url).send()?;
     let status = response.status();
-    println!("URL: {}, Method: {}, Status: {}, Output dir: {}", full_url, method, status, output_dir);
+    let mut file = File::create(output_file)?;
+    writeln!(file, "URL: {}, Method: {}, Status: {}", full_url, method, status)?;
     Ok(())
 }
 
 fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
 where P: AsRef<Path> {
-    let file = File::open(filename)?;
-    Ok(io::BufReader::new(file).lines())
+    File::open(filename).map(|file| io::BufReader::new(file).lines())
 }
