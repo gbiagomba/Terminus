@@ -1,3 +1,5 @@
+![alt tag](rsc/Firefly%20Create%20a%20minimalist%20yet%20powerful%20logo%20inspired%20by%20the%20Roman%20god%20Terminus,%20the%20protector%20of%20b%20(2).jpg)
+
 # `terminus`
 
 `terminus` is a command-line tool that checks if a list of URLs can be accessed by an unauthenticated user using various HTTP methods. It is useful for identifying potential security gaps in web applications where protected pages might be exposed without proper authentication. The tool supports testing individual URLs or multiple URLs from a file, specifying a custom port, and using any HTTP method. The results are saved in a workspace folder, including logs, status codes, and other useful data. The tool is written in Rust and is easy to install and use. It is licensed under the GPL-3.0 License and contributions are welcome!
