@@ -2,39 +2,88 @@
 
 # `terminus`
 
-`terminus` is a command-line tool that checks if a list of URLs can be accessed by an unauthenticated user using various HTTP methods. It is useful for identifying potential security gaps in web applications where protected pages might be exposed without proper authentication. The tool supports testing individual URLs or multiple URLs from a file, specifying a custom port, and using any HTTP method. The results are saved in a workspace folder, including logs, status codes, and other useful data. The tool is written in Rust and is easy to install and use. It is licensed under the GPL-3.0 License and contributions are welcome!
+`terminus` is a command-line tool designed to test the accessibility of URLs without authentication, using various HTTP methods. It's particularly useful for identifying unprotected paths to web servers that require authentication, helping to expose potential security vulnerabilities. The tool supports individual URLs or lists from files, custom HTTP methods, multiple ports, and concurrent execution.
 
 ---
 
 ## Features
-- Accepts individual URLs via the `-u` flag or a file containing a list of URLs with the `-f` flag.
-- Supports specifying a port using the `-p` flag.
-- Allows the use of any HTTP method via the `-X` flag, including common methods like `GET`, `POST`, `PUT`, or less common methods like `COPY`, `LOCK`, etc.
-- The `-X ALL` option will test all HTTP methods provided in the original shell script.
-- Saves results in a workspace folder, including logs, status codes, and other useful data.
+- **Single URL Testing**: Test a specific URL with the `-u` flag.
+- **File Input**: Test multiple URLs from a file using the `-f` flag.
+- **HTTP Methods**: Use any HTTP method with the `-X` flag or `ALL` to test all predefined methods.
+- **Multiple Ports**: Specify one or more ports using `-p`, accepting comma-separated values like `80,443`.
+- **Concurrent Execution**: Enable concurrent URL testing with the `-c` or `--concurrent` flag, enhancing performance.
+- **Custom Output**: Specify an output directory for results with the `-o` flag.
+- **Status Code Filtering**: Filter responses by status code using `-F`.
+- **Timeout Configuration**: Set a maximum request duration with `-m`.
 
 ---
 
 ## Installation
 
-### Prerequisites:
-1. Install Rust by following instructions from the official Rust website: [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
+Ensure Rust is installed on your system:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-2. Clone the repository:
-   ```bash
-   git clone git@github.com:gbiagomba/Terminus.git
-   cd terminus
-   ```
+Clone and build the repository:
+```bash
+git clone https://github.com/your_github/terminus.git
+cd terminus
+cargo build --release
+```
 
-3. Build the program:
-   ```bash
-   cargo build --release
-   ```
+Install the tool:
+```bash
+cargo install --path .
+```
 
-4. Install the program globally:
-   ```bash
-   cargo install --path .
-   ```
+---
+
+## Usage
+
+```plaintext
+terminus 1.0
+Checks if URLs can be accessed without authentication using various HTTP methods.
+
+USAGE:
+    terminus [OPTIONS]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -u, --url <URL>             Test a single URL
+    -f, --file <FILE>           Test multiple URLs from a file
+    -p, --port <PORTS>          Specify ports to connect to (comma-separated)
+    -X, --method <METHOD>       Specify HTTP method(s) to use; 'ALL' for all methods
+    -o, --output <DIR>          Specify the output directory for results
+    -F, --filter-code <CODE>    Filter results by HTTP status code
+    -m, --max-time <SECONDS>    Set a maximum time for requests
+    -c, --concurrent            Enable concurrent scanning of URLs
+```
+
+### Examples
+
+**Test a single URL with a specific method**:
+```bash
+terminus -u http://example.com -X POST
+```
+
+**Test multiple URLs from a file on multiple ports**:
+```bash
+terminus -f urls.txt -p 80,443 -X ALL
+```
+
+**Concurrently test all methods for a URL**:
+```bash
+terminus -u http://example.com -X ALL -c
+```
+
+**Filter by status code and set a custom output directory**:
+```bash
+terminus -u http://example.com -X GET -F 404 -o ./custom_results
+```
 
 ---
 
@@ -77,90 +126,12 @@
 
 ---
 
-## Usage
+## Contributing
 
-```
-terminus 1.0
-Checks if URLs can be accessed without authentication using various HTTP methods.
-
-USAGE:
-    terminus [FLAGS] [OPTIONS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -u, --url <URL>          Test a single URL
-    -f, --file <FILE>        Test multiple URLs from a file
-    -p, --port <PORT>        Specify the port to connect to (default: 80 for HTTP, 443 for HTTPS)
-    -X, --method <METHOD>    Specify the HTTP method to use (default: GET). Use 'ALL' to test all methods.
-    -o, --output <DIR>       Specify output directory (default: ./terminus_results)
-```
-
-### Example:
-
-1. **Test a single URL with a specific HTTP method**:
-   ```bash
-   terminus -u http://example.com -X POST
-   ```
-
-2. **Test a single URL with a specific port and HTTP method**:
-   ```bash
-   terminus -u http://example.com -p 8080 -X PUT
-   ```
-
-3. **Test multiple URLs from a file**:
-   ```bash
-   terminus -f urls.txt
-   ```
-
-4. **Test all HTTP methods on a single URL**:
-   ```bash
-   terminus -u http://example.com -X ALL
-   ```
-
-5. **Test all HTTP methods on multiple URLs from a file**:
-   ```bash
-   terminus -f urls.txt -X ALL
-   ```
-
-6. **Specify a custom output directory**:
-   ```bash
-   terminus -f urls.txt -X ALL -o ./custom_results
-   ```
-
----
-
-## HTTP Methods Tested
-
-When using the `-X ALL` flag, the following HTTP methods are tested:
-
-```
-ACL, BASELINE-CONTROL, BCOPY, BDELETE, BMOVE, BPROPFIND, BPROPPATCH,
-CHECKIN, CHECKOUT, CONNECT, COPY, DEBUG, DELETE, GET, HEAD,
-INDEX, LABEL, LOCK, MERGE, MKACTIVITY, MKCOL, MKWORKSPACE,
-MOVE, NOTIFY, OPTIONS, ORDERPATCH, PATCH, POLL, POST,
-PROPFIND, PROPPATCH, PUT, REPORT, RPC_IN_DATA, RPC_OUT_DATA,
-SEARCH, SUBSCRIBE, TRACE, UNCHECKOUT, UNLOCK, UNSUBSCRIBE,
-UPDATE, VERSION-CONTROL, X-MS-ENUMATTS
-```
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
 
 ---
 
 ## License
 
-This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for more details.
-
----
-
-## Contributing
-
-Contributions are welcome! Feel free to open issues or submit pull requests.
-
----
-
-## Credits
-
-Originally developed by Gilles Biagomba.
-
+GPL-3.0 License. For more details, see the [LICENSE](LICENSE) file.
