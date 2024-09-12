@@ -42,25 +42,24 @@ cargo install --path .
 ## Usage
 
 ```plaintext
-terminus 1.0
 Checks if URLs can be accessed without authentication using various HTTP methods.
 
-USAGE:
-    terminus [OPTIONS]
+Usage: terminus [OPTIONS]
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+Options:
+  -u, --url <URL>                  Specify a single URL to check
+  -f, --file <FILE>                Specify a file containing a list of URLs to check
+  -o, --output <FILE>              Specify the output file for the results
+  -p, --port <PORTS>               Specify comma-separated ports to connect to (e.g., 80,443)
+  -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use 'ALL' to test all methods or a specific HTTP method
+  -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
+  -m, --max-time <SECONDS>         Maximum time, in seconds, that you allow the request to take
+  -c, --concurrent <concurrent>    Enable concurrent scanning of URLs
+  -L, --follow <follow>            Follow HTTP redirects
+  -v, --verbose <verbose>          Increase verbosity to see details of requests and responses
+  -h, --help                       Print help
+  -V, --version                    Print version
 
-OPTIONS:
-    -u, --url <URL>             Test a single URL
-    -f, --file <FILE>           Test multiple URLs from a file
-    -p, --port <PORTS>          Specify ports to connect to (comma-separated)
-    -X, --method <METHOD>       Specify HTTP method(s) to use; 'ALL' for all methods
-    -o, --output <DIR>          Specify the output directory for results
-    -F, --filter-code <CODE>    Filter results by HTTP status code
-    -m, --max-time <SECONDS>    Set a maximum time for requests
-    -c, --concurrent            Enable concurrent scanning of URLs
 ```
 
 ### Examples

@@ -14,5 +14,7 @@ clap = { version = "4.0", features = ["derive"] }
 reqwest = { version = "0.11", features = ["blocking"] }
 rayon = "1.5.1"
 anyhow = "1.0"
+log = "0.4"        # Add logging dependency
+env_logger = "0.10" 
 
 [build-dependencies]

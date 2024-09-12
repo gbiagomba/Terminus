@@ -18,7 +18,7 @@ build:
 # Run the program with default arguments
 .PHONY: run
 run:
-	$(BUILD_DIR)/$(TARGET) -u http://example.com -X GET -o $(OUTPUT_DIR)
+	$(BUILD_DIR)/$(TARGET) -u http://example.com -X GET -o ./custom_results
 
 # Run the program with specific arguments (example with a URL)
 .PHONY: run-url
