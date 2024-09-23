@@ -1,6 +1,20 @@
 [package]
-name = "Terminus"
-version = "0.1.0"
+name = "terminus"
+version = "2.1.0"
 edition = "2021"
+description = "CLI tool to check URL accessibility using various HTTP methods."
+license = "GPL-3.0"
+authors = ["Gilles Biagomba<gilles.infosec@gmail.com>"]
+repository = "https://github.com/your_github/terminus"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = { version = "4.0", features = ["derive"] }
+reqwest = { version = "0.11", features = ["blocking"] }
+rayon = "1.5.1"
+anyhow = "1.0"
+log = "0.4"        # Add logging dependency
+env_logger = "0.10" 
+
+[build-dependencies]
