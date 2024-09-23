@@ -1,6 +1,6 @@
 [package]
 name = "terminus"
-version = "1.1.0"
+version = "2.1.0"
 edition = "2021"
 description = "CLI tool to check URL accessibility using various HTTP methods."
 license = "GPL-3.0"
