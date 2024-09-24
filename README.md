@@ -1,6 +1,7 @@
 ![alt tag](rsc/Firefly%20Create%20a%20minimalist%20yet%20powerful%20logo%20inspired%20by%20the%20Roman%20god%20Terminus,%20the%20protector%20of%20b%20(2).jpg)
 
 # `terminus`
+![GitHub](https://img.shields.io/github/license/Achiefs/fim) [![Tip Me via PayPal](https://img.shields.io/badge/PayPal-tip_me-green?logo=paypal)](paypal.me/gbiagomba)
 
 `terminus` is a command-line tool designed to test the accessibility of URLs without authentication, using various HTTP methods. It's particularly useful for identifying unprotected paths to web servers that require authentication, helping to expose potential security vulnerabilities. The tool supports individual URLs or lists from files, custom HTTP methods, multiple ports, and concurrent execution.
 
@@ -37,6 +38,45 @@ Install the tool:
 cargo install --path .
 ```
 
+---
+
+### Using the `Makefile`
+
+- **Build** the project:
+  ```bash
+  make build
+  ```
+
+- **Run** the program with default settings:
+  ```bash
+  make run
+  ```
+
+- **Run** with a specific URL and test all HTTP methods:
+  ```bash
+  make run-url
+  ```
+
+- **Run** with a file of URLs and test all HTTP methods:
+  ```bash
+  make run-file
+  ```
+
+- **Install** the program globally:
+  ```bash
+  make install
+  ```
+
+- **Uninstall** the program:
+  ```bash
+  make uninstall
+  ```
+
+- **Clean** the project:
+  ```bash
+  make clean
+  ```
+  
 ---
 
 ## Usage
@@ -86,42 +126,19 @@ terminus -u http://example.com -X GET -F 404 -o ./custom_results
 
 ---
 
-### Using the `Makefile`
+## HTTP Methods Tested
 
-- **Build** the project:
-  ```bash
-  make build
-  ```
+When using the `-X ALL` flag, the following HTTP methods are tested:
 
-- **Run** the program with default settings:
-  ```bash
-  make run
-  ```
-
-- **Run** with a specific URL and test all HTTP methods:
-  ```bash
-  make run-url
-  ```
-
-- **Run** with a file of URLs and test all HTTP methods:
-  ```bash
-  make run-file
-  ```
-
-- **Install** the program globally:
-  ```bash
-  make install
-  ```
-
-- **Uninstall** the program:
-  ```bash
-  make uninstall
-  ```
-
-- **Clean** the project:
-  ```bash
-  make clean
-  ```
+```
+ACL, BASELINE-CONTROL, BCOPY, BDELETE, BMOVE, BPROPFIND, BPROPPATCH,
+CHECKIN, CHECKOUT, CONNECT, COPY, DEBUG, DELETE, GET, HEAD,
+INDEX, LABEL, LOCK, MERGE, MKACTIVITY, MKCOL, MKWORKSPACE,
+MOVE, NOTIFY, OPTIONS, ORDERPATCH, PATCH, POLL, POST,
+PROPFIND, PROPPATCH, PUT, REPORT, RPC_IN_DATA, RPC_OUT_DATA,
+SEARCH, SUBSCRIBE, TRACE, UNCHECKOUT, UNLOCK, UNSUBSCRIBE,
+UPDATE, VERSION-CONTROL, X-MS-ENUMATTS
+```
 
 ---
 
