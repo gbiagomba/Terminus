@@ -9,10 +9,13 @@ use std::process;
 use std::str::FromStr;
 
 const HTTP_METHODS: &[&str] = &[
-    "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE", "PATCH", "ACL", "BASELINE-CONTROL", "BCOPY", "BDELETE", "BMOVE", 
-    "BPROPFIND", "BPROPPATCH", "CHECKIN", "CHECKOUT", "CONNECT", "COPY", "DEBUG", "INDEX", "LABEL", "LOCK", "MERGE", "MKACTIVITY", 
-    "MKCOL", "MKWORKSPACE", "MOVE", "NOTIFY", "ORDERPATCH", "POLL", "PROPFIND", "PROPPATCH", "REPORT", "RPC_IN_DATA", "RPC_OUT_DATA", 
-    "SEARCH", "SUBSCRIBE", "UNCHECKOUT", "UNLOCK", "UNSUBSCRIBE", "UPDATE", "VERSION-CONTROL", "X-MS-ENUMATTS"
+    "ACL", "BASELINE-CONTROL", "BCOPY", "BDELETE", "BMOVE", "BPROPFIND", "BPROPPATCH", 
+    "CHECKIN", "CHECKOUT", "CONNECT", "COPY", "DEBUG", "DELETE", "GET", "HEAD", 
+    "INDEX", "LABEL", "LOCK", "MERGE", "MKACTIVITY", "MKCOL", "MKWORKSPACE", 
+    "MOVE", "NOTIFY", "OPTIONS", "ORDERPATCH", "PATCH", "POLL", "POST", 
+    "PROPFIND", "PROPPATCH", "PUT", "REPORT", "RPC_IN_DATA", "RPC_OUT_DATA", 
+    "SEARCH", "SUBSCRIBE", "TRACE", "UNCHECKOUT", "UNLOCK", "UNSUBSCRIBE", 
+    "UPDATE", "VERSION-CONTROL", "X-MS-ENUMATTS"
 ];
 
 fn main() -> Result<()> {
@@ -150,11 +153,11 @@ fn main() -> Result<()> {
                         let basic_result = format!("URL: {}, Method: {}, Status: {}, Port: {}", url, method, status, port);
 
                         if verbose {
-                            let headers = headers_to_one_line_string(resp.headers());
-                            println!("{}\nHeaders: {}", basic_result, headers);
+                            let headers = headers_to_string(resp.headers());
+                            println!("{}\nHeaders:\n{}", basic_result, headers);
 
                             if let Some(file) = output_file.as_mut() {
-                                writeln!(file, "{}\nHeaders: {}", basic_result, headers).unwrap();
+                                writeln!(file, "{}\nHeaders:\n{}", basic_result, headers).unwrap();
                             }
                         } else {
                             println!("{}", basic_result);
@@ -196,11 +199,11 @@ fn build_client(follow_redirects: bool) -> Client {
     builder.build().unwrap()
 }
 
-fn headers_to_one_line_string(headers: &reqwest::header::HeaderMap) -> String {
+fn headers_to_string(headers: &reqwest::header::HeaderMap) -> String {
     headers.iter()
         .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("[invalid UTF-8]")))
         .collect::<Vec<_>>()
-        .join(", ")
+        .join("\n")
 }
 
 fn read_lines<P: AsRef<Path>>(filename: P) -> Result<Vec<String>> {
