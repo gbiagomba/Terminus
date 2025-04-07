@@ -1,4 +1,5 @@
 # `terminus`
+![GitHub](https://img.shields.io/github/license/Achiefs/fim) [![Tip Me via PayPal](https://img.shields.io/badge/PayPal-tip_me-green?logo=paypal)](paypal.me/gbiagomba)
 
 `terminus` is a command-line tool that checks if a list of URLs can be accessed by an unauthenticated user using various HTTP methods. It is useful for identifying potential security gaps in web applications where protected pages might be exposed without proper authentication. The tool supports testing individual URLs or multiple URLs from a file, specifying a custom port, and using any HTTP method. The results are saved in a workspace folder, including logs, status codes, and other useful data. The tool is written in Rust and is easy to install and use. It is licensed under the GPL-3.0 License and contributions are welcome!
 
