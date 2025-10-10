@@ -1,0 +1,4 @@
+# Terminus AI Analyzer Dependencies
+# Install with: pip install -r requirements.txt
+
+requests>=2.31.0

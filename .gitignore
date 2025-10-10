@@ -17,6 +17,7 @@ Cargo.lock
 # Testing files
 *.bkup
 *.txt
+!requirements.txt
 terminus_results/
 
 # macOS files

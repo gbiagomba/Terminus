@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2025-10-10
+
+### Added
+- **Smart Diffing**: Compare scan results to identify changes
+  - `--diff` flag to compare with previous JSON scan
+  - Displays new endpoints, removed endpoints, and status changes
+  - Colored diff output with clear change indicators (+/-/~)
+- **Response Pattern Matching**: Search for patterns in response bodies
+  - `--grep-response` flag with regex support
+  - Filters results to only show responses matching the pattern
+  - Useful for finding sensitive data, error messages, or specific content
+- **Rate Limiting & Throttling**: Control request rate for respectful scanning
+  - `--rate-limit` flag (e.g., `10/s`, `100/m`, `50/h`)
+  - `--random-delay` flag for random delays between requests (e.g., `1-5`)
+  - Helps avoid overwhelming production systems or triggering rate limits
+- **Response Body Analysis**: Analyze and extract information from responses
+  - `--check-body` flag to include body preview in results (first 200 chars)
+  - `--extract-links` flag to automatically extract URLs from response bodies
+  - Extracts URLs from href, src attributes and plain text
+- **AI-Powered Analysis Script**: Post-processing tool for scan results
+  - `terminus_ai_analyzer.py` with support for 6 AI providers
+  - Local providers: Ollama, LM Studio, vLLM
+  - Cloud providers: OpenAI, Anthropic Claude, Google Gemini
+  - Three analysis personas: Security Engineer (default), Developer, TPM
+  - Customizable AI models and API endpoints
+
+### Changed
+- Updated `ScanResult` struct to include new fields:
+  - `body_preview`: Optional preview of response body
+  - `matched_patterns`: Patterns found in response body
+  - `extracted_links`: URLs extracted from response
+- Enhanced output formats (JSON, HTML, CSV) to include new body analysis fields
+- Updated help text and documentation with all new features
+- Improved scanning loop to support conditional body reading
+
+### Dependencies
+- Added `rand` 0.8 for random delay generation
+
+### Examples
+```bash
+# Compare two scans
+terminus -f targets.txt --diff previous_scan.json -o new_scan
+
+# Find admin panels
+terminus -f urls.txt --grep-response "admin|dashboard|config"
+
+# Rate-limited production scan
+terminus -f prod_urls.txt --rate-limit 10/s --random-delay 1-3
+
+# Extract links from responses
+terminus -u https://example.com --extract-links
+
+# AI analysis of results
+python terminus_ai_analyzer.py results.json --provider ollama --persona security
+```
+
 ## [2.4.1] - 2025-10-10
 
 ### Added

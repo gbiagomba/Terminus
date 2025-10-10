@@ -51,7 +51,7 @@ impl FromStr for OutputFormat {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ScanResult {
     url: String,
     method: String,
@@ -59,11 +59,61 @@ struct ScanResult {
     port: u16,
     headers: Option<String>,
     error: Option<String>,
+    body_preview: Option<String>,
+    matched_patterns: Option<Vec<String>>,
+    extracted_links: Option<Vec<String>>,
+}
+
+#[derive(Debug)]
+struct DiffResult {
+    new_endpoints: Vec<ScanResult>,
+    removed_endpoints: Vec<ScanResult>,
+    status_changes: Vec<(ScanResult, ScanResult)>, // (old, new)
+}
+
+struct RateLimiter {
+    requests_per_second: f64,
+    last_request: std::time::Instant,
+}
+
+impl RateLimiter {
+    fn new(rate_str: &str) -> Result<Self> {
+        let parts: Vec<&str> = rate_str.split('/').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid rate format. Use format like '10/s' or '100/m'");
+        }
+
+        let count: f64 = parts[0].parse()
+            .context("Invalid rate count")?;
+
+        let requests_per_second = match parts[1] {
+            "s" => count,
+            "m" => count / 60.0,
+            "h" => count / 3600.0,
+            _ => anyhow::bail!("Invalid rate unit. Use 's' (seconds), 'm' (minutes), or 'h' (hours)"),
+        };
+
+        Ok(RateLimiter {
+            requests_per_second,
+            last_request: std::time::Instant::now(),
+        })
+    }
+
+    fn wait(&mut self) {
+        let interval = std::time::Duration::from_secs_f64(1.0 / self.requests_per_second);
+        let elapsed = self.last_request.elapsed();
+
+        if elapsed < interval {
+            std::thread::sleep(interval - elapsed);
+        }
+
+        self.last_request = std::time::Instant::now();
+    }
 }
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.4.0")
+        .version("2.5.0")
         .about("URL testing with support for multiple input formats (nmap, testssl, ProjectDiscovery), IPv4/IPv6, and various output formats")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -82,11 +132,46 @@ fn main() -> Result<()> {
         .arg(Arg::new("cookie").short('b').long("cookie").value_name("COOKIE").help("Add cookie string (format: 'name1=value1; name2=value2')"))
         .arg(Arg::new("cookie-file").short('c').long("cookie-file").value_name("FILE").help("Read cookies from file"))
         .arg(Arg::new("http-version").long("http-version").value_name("VERSION").help("Force HTTP version (1.0, 1.1, or 2)"))
+        .arg(Arg::new("diff").long("diff").value_name("FILE").help("Compare results with previous scan (JSON file)"))
+        .arg(Arg::new("grep-response").long("grep-response").value_name("PATTERN").help("Search for pattern in response body (regex supported)"))
+        .arg(Arg::new("rate-limit").long("rate-limit").value_name("RATE").help("Rate limit requests (e.g., '10/s', '100/m')"))
+        .arg(Arg::new("random-delay").long("random-delay").value_name("RANGE").help("Random delay between requests in seconds (e.g., '1-5')"))
+        .arg(Arg::new("check-body").long("check-body").help("Analyze response body content").action(ArgAction::SetTrue))
+        .arg(Arg::new("extract-links").long("extract-links").help("Extract and display links from response body").action(ArgAction::SetTrue))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
     let allow_insecure = matches.get_flag("insecure");
     let follow_redirects = matches.get_flag("follow");
+    let check_body = matches.get_flag("check-body");
+    let extract_links = matches.get_flag("extract-links");
+
+    // Parse rate limiting
+    let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
+        Some(RateLimiter::new(rate_str)?)
+    } else {
+        None
+    };
+
+    // Parse random delay range
+    let random_delay_range = if let Some(delay_str) = matches.get_one::<String>("random-delay") {
+        let parts: Vec<&str> = delay_str.split('-').collect();
+        if parts.len() != 2 {
+            eprintln!("Invalid random-delay format. Use format like '1-5'");
+            process::exit(1);
+        }
+        let min: u64 = parts[0].parse().context("Invalid delay minimum")?;
+        let max: u64 = parts[1].parse().context("Invalid delay maximum")?;
+        Some((min, max))
+    } else {
+        None
+    };
+
+    // Parse grep pattern for response body matching
+    let grep_pattern = matches.get_one::<String>("grep-response")
+        .map(|p| Regex::new(p))
+        .transpose()
+        .context("Invalid regex pattern")?;
 
     // Parse proxy if provided
     let mut client_builder = ClientBuilder::new()
@@ -241,6 +326,18 @@ fn main() -> Result<()> {
         for method in &methods {
             let req_method = Method::from_str(method).unwrap_or(Method::GET);
             for port in &test_ports {
+                // Apply rate limiting if configured
+                if let Some(ref mut limiter) = rate_limiter {
+                    limiter.wait();
+                }
+
+                // Apply random delay if configured
+                if let Some((min, max)) = random_delay_range {
+                    use rand::Rng;
+                    let delay = rand::thread_rng().gen_range(min..=max);
+                    std::thread::sleep(std::time::Duration::from_secs(delay));
+                }
+
                 let full_url = format!("{}:{}", url, port);
                 match client.request(req_method.clone(), &full_url)
                     .headers(custom_headers.clone())
@@ -259,14 +356,70 @@ fn main() -> Result<()> {
                             None
                         };
 
-                        results.push(ScanResult {
-                            url: url.clone(),
-                            method: method.clone(),
-                            status: status.as_u16(),
-                            port: *port,
-                            headers: headers_str,
-                            error: None,
-                        });
+                        // Read response body if needed for analysis
+                        let body_text = if check_body || extract_links || grep_pattern.is_some() {
+                            resp.text().ok()
+                        } else {
+                            None
+                        };
+
+                        // Extract body preview (first 200 chars) if check_body is enabled
+                        let body_preview = if check_body {
+                            body_text.as_ref().map(|b| {
+                                let preview = b.chars().take(200).collect::<String>();
+                                if b.len() > 200 {
+                                    format!("{}...", preview)
+                                } else {
+                                    preview
+                                }
+                            })
+                        } else {
+                            None
+                        };
+
+                        // Search for patterns in response body
+                        let matched_patterns = if let Some(ref pattern) = grep_pattern {
+                            body_text.as_ref().and_then(|b| {
+                                let matches: Vec<String> = pattern.find_iter(b)
+                                    .map(|m| m.as_str().to_string())
+                                    .collect();
+                                if matches.is_empty() {
+                                    None
+                                } else {
+                                    Some(matches)
+                                }
+                            })
+                        } else {
+                            None
+                        };
+
+                        // Extract links from response body
+                        let extracted_links = if extract_links {
+                            body_text.as_ref().map(|b| extract_links_from_body(b))
+                        } else {
+                            None
+                        };
+
+                        // Only add result if there's a pattern match (when grep is enabled) or always if grep is not enabled
+                        let should_add = if grep_pattern.is_some() {
+                            matched_patterns.is_some()
+                        } else {
+                            true
+                        };
+
+                        if should_add {
+                            results.push(ScanResult {
+                                url: url.clone(),
+                                method: method.clone(),
+                                status: status.as_u16(),
+                                port: *port,
+                                headers: headers_str,
+                                error: None,
+                                body_preview,
+                                matched_patterns,
+                                extracted_links,
+                            });
+                        }
                     }
                     Err(e) => {
                         results.push(ScanResult {
@@ -276,11 +429,21 @@ fn main() -> Result<()> {
                             port: *port,
                             headers: None,
                             error: Some(e.to_string()),
+                            body_preview: None,
+                            matched_patterns: None,
+                            extracted_links: None,
                         });
                     }
                 }
             }
         }
+    }
+
+    // Handle diff mode if requested
+    if let Some(diff_file) = matches.get_one::<String>("diff") {
+        let old_results = load_previous_scan(diff_file)?;
+        let diff = compute_diff(&old_results, &results);
+        display_diff(&diff);
     }
 
     // Output results in the specified format(s)
@@ -673,4 +836,126 @@ fn csv_escape(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn load_previous_scan(filename: &str) -> Result<Vec<ScanResult>> {
+    let content = std::fs::read_to_string(filename)
+        .with_context(|| format!("Cannot read diff file: {}", filename))?;
+    let results: Vec<ScanResult> = serde_json::from_str(&content)
+        .context("Failed to parse previous scan results. File must be in JSON format.")?;
+    Ok(results)
+}
+
+fn compute_diff(old_results: &[ScanResult], new_results: &[ScanResult]) -> DiffResult {
+    use std::collections::HashMap;
+
+    // Create lookup maps using url+method+port as key
+    let mut old_map: HashMap<String, &ScanResult> = HashMap::new();
+    for result in old_results {
+        let key = format!("{}:{}:{}", result.url, result.method, result.port);
+        old_map.insert(key, result);
+    }
+
+    let mut new_map: HashMap<String, &ScanResult> = HashMap::new();
+    for result in new_results {
+        let key = format!("{}:{}:{}", result.url, result.method, result.port);
+        new_map.insert(key, result);
+    }
+
+    let mut diff = DiffResult {
+        new_endpoints: Vec::new(),
+        removed_endpoints: Vec::new(),
+        status_changes: Vec::new(),
+    };
+
+    // Find new endpoints
+    for (key, new_result) in &new_map {
+        if !old_map.contains_key(key) {
+            diff.new_endpoints.push((*new_result).clone());
+        }
+    }
+
+    // Find removed endpoints and status changes
+    for (key, old_result) in &old_map {
+        if let Some(new_result) = new_map.get(key) {
+            // Endpoint exists in both - check for status changes
+            if old_result.status != new_result.status {
+                diff.status_changes.push(((*old_result).clone(), (*new_result).clone()));
+            }
+        } else {
+            // Endpoint was removed
+            diff.removed_endpoints.push((*old_result).clone());
+        }
+    }
+
+    diff
+}
+
+fn display_diff(diff: &DiffResult) {
+    println!("\n{}", "=".repeat(80));
+    println!("TERMINUS SCAN DIFF RESULTS");
+    println!("{}\n", "=".repeat(80));
+
+    if !diff.new_endpoints.is_empty() {
+        println!("NEW ENDPOINTS ({}):", diff.new_endpoints.len());
+        for result in &diff.new_endpoints {
+            println!("  [+] {}:{} {} → Status {}",
+                result.url, result.port, result.method, result.status);
+        }
+        println!();
+    }
+
+    if !diff.removed_endpoints.is_empty() {
+        println!("REMOVED ENDPOINTS ({}):", diff.removed_endpoints.len());
+        for result in &diff.removed_endpoints {
+            println!("  [-] {}:{} {} (was Status {})",
+                result.url, result.port, result.method, result.status);
+        }
+        println!();
+    }
+
+    if !diff.status_changes.is_empty() {
+        println!("STATUS CHANGES ({}):", diff.status_changes.len());
+        for (old, new) in &diff.status_changes {
+            println!("  [~] {}:{} {} → Status {} → {}",
+                new.url, new.port, new.method, old.status, new.status);
+        }
+        println!();
+    }
+
+    if diff.new_endpoints.is_empty() && diff.removed_endpoints.is_empty() && diff.status_changes.is_empty() {
+        println!("No differences found between scans.\n");
+    }
+
+    println!("{}\n", "=".repeat(80));
+}
+
+fn extract_links_from_body(body: &str) -> Vec<String> {
+    let mut links = HashSet::new();
+
+    // Regex patterns for different types of links
+    let url_pattern = Regex::new(r#"https?://[^\s<>"{}|\\^`\[\]]+"#).unwrap();
+    let href_pattern = Regex::new(r#"href=["']([^"']+)["']"#).unwrap();
+    let src_pattern = Regex::new(r#"src=["']([^"']+)["']"#).unwrap();
+
+    // Extract full URLs
+    for capture in url_pattern.find_iter(body) {
+        links.insert(capture.as_str().to_string());
+    }
+
+    // Extract href attributes
+    for capture in href_pattern.captures_iter(body) {
+        if let Some(url) = capture.get(1) {
+            links.insert(url.as_str().to_string());
+        }
+    }
+
+    // Extract src attributes
+    for capture in src_pattern.captures_iter(body) {
+        if let Some(url) = capture.get(1) {
+            links.insert(url.as_str().to_string());
+        }
+    }
+
+    links.into_iter().collect()
 }

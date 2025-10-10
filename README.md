@@ -40,6 +40,14 @@
 - **Redirect Handling**: Follow redirects with `-L` flag
 - **Verbose Output**: View detailed response headers with `-v` flag
 
+### Smart Analysis Features (v2.5.0)
+- **Smart Diffing**: Compare two scans and identify new/removed endpoints and status changes
+- **Pattern Matching**: Search for specific patterns in response bodies using regex
+- **Rate Limiting**: Control request rate for respectful scanning (e.g., `10/s`, `100/m`)
+- **Random Delays**: Add random delays between requests to avoid detection
+- **Body Analysis**: Analyze response body content with `--check-body`
+- **Link Extraction**: Automatically extract URLs from response bodies with `--extract-links`
+
 ---
 
 ## Installation
@@ -127,6 +135,12 @@ Options:
   -b, --cookie <COOKIE>            Add cookie string (format: 'name1=value1; name2=value2')
   -c, --cookie-file <FILE>         Read cookies from file
       --http-version <VERSION>     Force HTTP version (1.0, 1.1, or 2)
+      --diff <FILE>                Compare results with previous scan (JSON file)
+      --grep-response <PATTERN>    Search for pattern in response body (regex supported)
+      --rate-limit <RATE>          Rate limit requests (e.g., '10/s', '100/m')
+      --random-delay <RANGE>       Random delay between requests in seconds (e.g., '1-5')
+      --check-body                 Analyze response body content
+      --extract-links              Extract and display links from response body
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -253,6 +267,131 @@ terminus -u https://api.example.com -X POST \
   --http-version 2 \
   --output-format all \
   -o pentest_results
+```
+
+#### Smart Analysis Examples (v2.5.0)
+
+**Compare two scans to identify changes**:
+```bash
+# First scan
+terminus -f targets.txt --output-format json -o scan1
+
+# Second scan (after changes)
+terminus -f targets.txt --output-format json -o scan2
+
+# Compare scans
+terminus -f targets.txt --diff scan1.json -o scan2
+```
+
+**Search for sensitive patterns in responses**:
+```bash
+# Find admin panels or config files
+terminus -f urls.txt --grep-response "admin|backup|config|\.env"
+
+# Find API keys or tokens
+terminus -f api_endpoints.txt --grep-response "[Aa]pi[_-]?[Kk]ey|[Tt]oken|[Ss]ecret"
+
+# Search for specific error messages
+terminus -f urls.txt --grep-response "SQL syntax|mysql_fetch|ORA-[0-9]+"
+```
+
+**Rate-limited scanning for production environments**:
+```bash
+# 10 requests per second
+terminus -f production_urls.txt --rate-limit 10/s
+
+# 100 requests per minute
+terminus -f large_list.txt --rate-limit 100/m
+
+# Combine with random delays for stealth
+terminus -f targets.txt --rate-limit 5/s --random-delay 1-3
+```
+
+**Analyze response bodies and extract links**:
+```bash
+# Check response body content
+terminus -u https://example.com --check-body -v
+
+# Extract all links from response
+terminus -u https://example.com --extract-links
+
+# Combine with grep for specific content
+terminus -f urls.txt --check-body --grep-response "password|credential" -o findings
+```
+
+**Advanced reconnaissance workflow**:
+```bash
+# Scan with body analysis and link extraction
+terminus -f targets.txt \
+  --check-body \
+  --extract-links \
+  --grep-response "api|v[0-9]|admin" \
+  --rate-limit 20/s \
+  --output-format all \
+  -o recon_results
+
+# Compare with previous scan
+terminus -f targets.txt \
+  --diff recon_results.json \
+  --check-body \
+  -o new_scan
+```
+
+## AI-Powered Analysis
+
+Terminus includes a companion Python script for AI-powered analysis of scan results using multiple AI providers.
+
+### Features
+- **Local AI Providers**: Ollama, LM Studio, vLLM
+- **Cloud AI Providers**: OpenAI, Anthropic Claude, Google Gemini
+- **Multiple Personas**:
+  - Security Engineer (default): Focus on vulnerabilities and security hardening
+  - Developer: Focus on bugs, code-level fixes, and API design
+  - Technical Program Manager: Focus on business impact and project decisions
+
+### Installation
+```bash
+pip install -r requirements.txt
+```
+
+### Usage Examples
+
+**Analyze with Ollama (local)**:
+```bash
+python terminus_ai_analyzer.py scan_results.json --provider ollama --persona security
+```
+
+**Analyze with specific model**:
+```bash
+python terminus_ai_analyzer.py scan_results.json --provider ollama --model llama3 --persona developer
+```
+
+**Analyze with OpenAI**:
+```bash
+export OPENAI_API_KEY=sk-...
+python terminus_ai_analyzer.py scan_results.json --provider openai --persona tpm
+```
+
+**Analyze with Anthropic Claude**:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python terminus_ai_analyzer.py scan_results.json --provider anthropic --persona security
+```
+
+**Save analysis to file**:
+```bash
+python terminus_ai_analyzer.py scan_results.json \
+  --provider ollama \
+  --persona security \
+  --output analysis_report.txt
+```
+
+**Custom local AI server**:
+```bash
+python terminus_ai_analyzer.py scan_results.json \
+  --provider lmstudio \
+  --base-url http://localhost:1234 \
+  --persona developer
 ```
 
 ---
