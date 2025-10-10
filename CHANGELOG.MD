@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2025-10-10
+
+### Added
+- **CSV Output Format**: Export scan results to CSV format
+  - Use `--output-format csv` to generate CSV files
+  - Includes proper CSV escaping for special characters
+  - Supports both verbose (with headers) and standard output
+  - CSV format compatible with Excel, Google Sheets, and other spreadsheet applications
+
+### Changed
+- Updated help text to include CSV in output format options
+- Enhanced documentation with CSV examples
+
 ## [2.4.0] - 2025-10-10
 
 ### Added

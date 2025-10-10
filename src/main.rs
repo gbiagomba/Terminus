@@ -31,6 +31,7 @@ enum OutputFormat {
     Txt,
     Json,
     Html,
+    Csv,
     All,
 }
 
@@ -43,6 +44,7 @@ impl FromStr for OutputFormat {
             "txt" => Ok(OutputFormat::Txt),
             "json" => Ok(OutputFormat::Json),
             "html" => Ok(OutputFormat::Html),
+            "csv" => Ok(OutputFormat::Csv),
             "all" => Ok(OutputFormat::All),
             _ => Err(format!("Invalid output format: {}", s)),
         }
@@ -72,7 +74,7 @@ fn main() -> Result<()> {
         .arg(Arg::new("verbose").short('v').long("verbose").help("Enable verbose output with response headers").action(ArgAction::SetTrue))
         .arg(Arg::new("follow").short('L').long("follow").help("Follow HTTP redirects").action(ArgAction::SetTrue))
         .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name (extension added based on format)"))
-        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, all (default: stdout)"))
+        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, all (default: stdout)"))
         .arg(Arg::new("filter").short('F').long("filter-code").value_name("STATUS_CODE").help("Filter results by HTTP status code"))
         .arg(Arg::new("proxy").short('x').long("proxy").value_name("PROXY").help("Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)"))
         .arg(Arg::new("header").short('H').long("header").value_name("HEADER").action(ArgAction::Append).help("Add custom header (format: 'Name: Value'). Can be specified multiple times"))
@@ -539,11 +541,13 @@ fn output_results(results: &[ScanResult], format: OutputFormat, output_base: Opt
         OutputFormat::Txt => output_txt(results, output_base, verbose)?,
         OutputFormat::Json => output_json(results, output_base)?,
         OutputFormat::Html => output_html(results, output_base)?,
+        OutputFormat::Csv => output_csv(results, output_base, verbose)?,
         OutputFormat::All => {
             output_stdout(results, verbose);
             output_txt(results, output_base, verbose)?;
             output_json(results, output_base)?;
             output_html(results, output_base)?;
+            output_csv(results, output_base, verbose)?;
         }
     }
     Ok(())
@@ -630,4 +634,43 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     std::fs::write(&filename, html)?;
     eprintln!("Results written to {}", filename);
     Ok(())
+}
+
+fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) -> Result<()> {
+    let filename = format!("{}.csv", output_base.unwrap_or("terminus_results"));
+    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
+
+    // Write CSV header
+    if verbose {
+        writeln!(file, "URL,Method,Status,Port,Headers,Error")?;
+    } else {
+        writeln!(file, "URL,Method,Status,Port,Error")?;
+    }
+
+    // Write CSV rows
+    for result in results {
+        let url = csv_escape(&result.url);
+        let method = csv_escape(&result.method);
+        let status = result.status.to_string();
+        let port = result.port.to_string();
+        let error = csv_escape(result.error.as_deref().unwrap_or(""));
+
+        if verbose {
+            let headers = csv_escape(result.headers.as_deref().unwrap_or(""));
+            writeln!(file, "{},{},{},{},{},{}", url, method, status, port, headers, error)?;
+        } else {
+            writeln!(file, "{},{},{},{},{}", url, method, status, port, error)?;
+        }
+    }
+
+    eprintln!("Results written to {}", filename);
+    Ok(())
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
 }

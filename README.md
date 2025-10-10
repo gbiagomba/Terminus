@@ -21,9 +21,10 @@
 - **IPv4/IPv6 Support**: Native support for both IPv4 and IPv6 addresses with `-6` flag
 
 ### Output Options
-- **Multiple Output Formats**: stdout, txt, json, html, or all formats simultaneously
+- **Multiple Output Formats**: stdout, txt, json, html, csv, or all formats simultaneously
 - **Output Format Control**: Use `--output-format` to specify desired format(s)
 - **Custom Output Location**: Specify output file base name with `-o` flag
+- **CSV Export**: Generate CSV files for easy data analysis and import into spreadsheets
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
@@ -118,7 +119,7 @@ Options:
   -v, --verbose                    Enable verbose output with response headers
   -L, --follow                     Follow HTTP redirects
   -o, --output <FILE>              Output file base name (extension added based on format)
-      --output-format <FORMAT>     Output format: stdout, txt, json, html, all (default: stdout)
+      --output-format <FORMAT>     Output format: stdout, txt, json, html, csv, all (default: stdout)
   -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
   -x, --proxy <PROXY>              Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)
   -H, --header <HEADER>            Add custom header (format: 'Name: Value'). Can be specified multiple times
@@ -208,6 +209,11 @@ terminus -u http://example.com --output-format json -o scan_results
 **Output to HTML**:
 ```bash
 terminus -f urls.txt --output-format html -o scan_results
+```
+
+**Output to CSV**:
+```bash
+terminus -f urls.txt --output-format csv -o scan_results
 ```
 
 **Output to all formats**:
