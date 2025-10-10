@@ -21,7 +21,12 @@ COPY . .
 RUN cargo build --release
 
 # Start a new stage from a smaller base image
-FROM debian:buster-slim
+FROM debian:bookworm-slim
+
+# Install CA certificates for HTTPS support
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory in the new stage
 WORKDIR /app
@@ -29,8 +34,10 @@ WORKDIR /app
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/target/release/terminus /app/
 
-# Expose any necessary ports (if applicable, you can specify any ports here)
-# EXPOSE 8080
-
 # Define the entry point for the container
 ENTRYPOINT ["./terminus"]
+
+# Add metadata
+LABEL maintainer="Gilles Biagomba <gilles.infosec@gmail.com>"
+LABEL version="2.3.0"
+LABEL description="CLI tool to check URL accessibility with proxy, headers, cookies, and HTTP/1-2 support"

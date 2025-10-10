@@ -12,10 +12,15 @@
 - **File Input**: Test multiple URLs from a file using the `-f` flag.
 - **HTTP Methods**: Use any HTTP method with the `-X` flag or `ALL` to test all predefined methods.
 - **Multiple Ports**: Specify one or more ports using `-p`, accepting comma-separated values like `80,443`.
-- **Concurrent Execution**: Enable concurrent URL testing with the `-c` or `--concurrent` flag, enhancing performance.
 - **Custom Output**: Specify an output directory for results with the `-o` flag.
 - **Status Code Filtering**: Filter responses by status code using `-F`.
-- **Timeout Configuration**: Set a maximum request duration with `-m`.
+- **Proxy Support**: Route traffic through proxy tools like Burp Suite using the `-x` flag.
+- **Custom Headers**: Add custom headers via `-H` flag (multiple allowed) or from file using `--header-file`.
+- **Cookie Support**: Include cookies with the `-b` flag or from file using `-c/--cookie-file`.
+- **HTTP Version Control**: Force HTTP/1.0, HTTP/1.1, or HTTP/2 using `--http-version`.
+- **TLS/SSL Options**: Allow insecure connections with `-k` flag.
+- **Redirect Handling**: Follow redirects with the `-L` flag.
+- **Verbose Output**: View detailed response headers with the `-v` flag.
 
 ---
 
@@ -82,21 +87,26 @@ cargo install --path .
 ## Usage
 
 ```plaintext
-Checks if URLs can be accessed without authentication using various HTTP methods.
+URL testing with multiple methods, ports, verbose logging, redirects, proxy, cookies, headers, and HTTP version support
 
 Usage: terminus [OPTIONS]
 
 Options:
   -u, --url <URL>                  Specify a single URL to check
   -f, --file <FILE>                Specify a file containing a list of URLs to check
-  -o, --output <FILE>              Specify the output file for the results
-  -p, --port <PORTS>               Specify comma-separated ports to connect to (e.g., 80,443)
-  -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use 'ALL' to test all methods or a specific HTTP method
+  -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use ALL to test all methods
+  -p, --port <PORTS>               Comma-separated ports to connect to (e.g., 80,443)
+  -k, --insecure                   Allow insecure SSL connections
+  -v, --verbose                    Enable verbose output with response headers
+  -L, --follow                     Follow HTTP redirects
+  -o, --output <FILE>              Write results to file
   -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
-  -m, --max-time <SECONDS>         Maximum time, in seconds, that you allow the request to take
-  -c, --concurrent <concurrent>    Enable concurrent scanning of URLs
-  -L, --follow <follow>            Follow HTTP redirects
-  -v, --verbose <verbose>          Increase verbosity to see details of requests and responses
+  -x, --proxy <PROXY>              Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)
+  -H, --header <HEADER>            Add custom header (format: 'Name: Value'). Can be specified multiple times
+      --header-file <FILE>         Read headers from file (one per line, format: 'Name: Value')
+  -b, --cookie <COOKIE>            Add cookie string (format: 'name1=value1; name2=value2')
+  -c, --cookie-file <FILE>         Read cookies from file
+      --http-version <VERSION>     Force HTTP version (1.0, 1.1, or 2)
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -114,14 +124,50 @@ terminus -u http://example.com -X POST
 terminus -f urls.txt -p 80,443 -X ALL
 ```
 
-**Concurrently test all methods for a URL**:
+**Test with proxy (e.g., Burp Suite)**:
 ```bash
-terminus -u http://example.com -X ALL -c
+terminus -u https://example.com -x http://127.0.0.1:8080 -k
+```
+
+**Test with custom headers**:
+```bash
+terminus -u https://example.com -H "Authorization: Bearer token123" -H "X-Custom: value"
+```
+
+**Test with headers from file**:
+```bash
+terminus -u https://example.com --header-file headers.txt
+```
+
+**Test with cookies**:
+```bash
+terminus -u https://example.com -b "session=abc123; user=admin"
+```
+
+**Test with cookies from file**:
+```bash
+terminus -u https://example.com -c cookies.txt
+```
+
+**Force HTTP/2**:
+```bash
+terminus -u https://example.com --http-version 2
 ```
 
 **Filter by status code and set a custom output directory**:
 ```bash
 terminus -u http://example.com -X GET -F 404 -o ./custom_results
+```
+
+**Complex example with multiple features**:
+```bash
+terminus -u https://api.example.com -X POST \
+  -H "Content-Type: application/json" \
+  -b "session=xyz789" \
+  -x http://127.0.0.1:8080 \
+  -k -v -L \
+  --http-version 2 \
+  -o results.txt
 ```
 
 ---

@@ -1,8 +1,8 @@
 [package]
 name = "terminus"
-version = "2.2.0"
+version = "2.3.0"
 edition = "2021"
-description = "CLI tool to check URL accessibility using various HTTP methods."
+description = "CLI tool to check URL accessibility using various HTTP methods with proxy, headers, cookies, and HTTP/1-2 support."
 license = "GPL-3.0"
 authors = ["Gilles Biagomba<gilles.infosec@gmail.com>"]
 repository = "https://github.com/your_github/terminus"
@@ -11,7 +11,7 @@ repository = "https://github.com/your_github/terminus"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-reqwest = { version = "0.12.23", features = ["blocking"] }
+reqwest = { version = "0.12.23", features = ["blocking", "cookies", "http2"] }
 rayon = "1.5.1"
 anyhow = "1.0"
 log = "0.4"        # Add logging dependency

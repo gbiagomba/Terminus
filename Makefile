@@ -15,6 +15,26 @@ all: build
 build:
 	$(CARGO) build --release
 
+# Run tests
+.PHONY: test
+test:
+	$(CARGO) test
+
+# Check code without building
+.PHONY: check
+check:
+	$(CARGO) check
+
+# Format code
+.PHONY: fmt
+fmt:
+	$(CARGO) fmt
+
+# Run clippy linter
+.PHONY: lint
+lint:
+	$(CARGO) clippy -- -D warnings
+
 # Run the program with default arguments
 .PHONY: run
 run:
