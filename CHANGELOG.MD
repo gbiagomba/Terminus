@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2025-10-10
+
+### Added
+- **Input Format Support**: Parse multiple input formats automatically
+  - Nmap XML output (`-oX`)
+  - Nmap greppable output (`-oG`)
+  - testssl.sh JSON output
+  - ProjectDiscovery JSON outputs (nuclei, katana, etc.)
+- **Stdin Pipe Support**: Read input from stdin for tool chaining
+  - Example: `cat domains.txt | httpx | terminus`
+- **IPv4/IPv6 Support**: Native support for both IP versions
+  - IPv6 scanning enabled with `-6/--ipv6` flag
+  - Automatic IP address detection and parsing
+- **Multiple Output Formats**: Generate results in various formats
+  - stdout (default), txt, json, html, or all simultaneously
+  - `--output-format` flag to specify format(s)
+  - `-o` flag sets base name (extension added automatically)
+- **Enhanced URL Parsing**: Intelligent target extraction
+  - Automatic detection of URLs, IPs, and hostnames
+  - Support for piped input from security tools
+  - Deduplication of targets across formats
+
+### Changed
+- Refactored input handling for better format detection
+- Improved error handling and reporting
+- Enhanced output file management with proper extensions
+- Updated help text and documentation
+
+### Dependencies
+- Added `serde` 1.0 for JSON serialization
+- Added `serde_json` 1.0 for JSON parsing
+- Added `quick-xml` 0.36 for XML parsing
+- Added `regex` 1.10 for pattern matching
+- Added `atty` 0.2 for stdin detection
+
 ## [2.3.0] - 2025-10-10
 
 ### Added

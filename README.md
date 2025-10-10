@@ -8,19 +8,36 @@
 ---
 
 ## Features
-- **Single URL Testing**: Test a specific URL with the `-u` flag.
-- **File Input**: Test multiple URLs from a file using the `-f` flag.
-- **HTTP Methods**: Use any HTTP method with the `-X` flag or `ALL` to test all predefined methods.
-- **Multiple Ports**: Specify one or more ports using `-p`, accepting comma-separated values like `80,443`.
-- **Custom Output**: Specify an output directory for results with the `-o` flag.
-- **Status Code Filtering**: Filter responses by status code using `-F`.
-- **Proxy Support**: Route traffic through proxy tools like Burp Suite using the `-x` flag.
-- **Custom Headers**: Add custom headers via `-H` flag (multiple allowed) or from file using `--header-file`.
-- **Cookie Support**: Include cookies with the `-b` flag or from file using `-c/--cookie-file`.
-- **HTTP Version Control**: Force HTTP/1.0, HTTP/1.1, or HTTP/2 using `--http-version`.
-- **TLS/SSL Options**: Allow insecure connections with `-k` flag.
-- **Redirect Handling**: Follow redirects with the `-L` flag.
-- **Verbose Output**: View detailed response headers with the `-v` flag.
+
+### Input Sources
+- **Single URL/IP Testing**: Test URLs or IP addresses (IPv4/IPv6) with the `-u` flag
+- **File Input**: Support for multiple input formats via `-f` flag:
+  - Plain text files with URLs/domains/IPs
+  - Nmap XML output (`-oX`)
+  - Nmap greppable output (`-oG`)
+  - testssl.sh JSON output
+  - ProjectDiscovery JSON (nuclei, katana)
+- **Stdin Pipe**: Chain tools together (e.g., `cat domains.txt | httpx | terminus`)
+- **IPv4/IPv6 Support**: Native support for both IPv4 and IPv6 addresses with `-6` flag
+
+### Output Options
+- **Multiple Output Formats**: stdout, txt, json, html, or all formats simultaneously
+- **Output Format Control**: Use `--output-format` to specify desired format(s)
+- **Custom Output Location**: Specify output file base name with `-o` flag
+
+### HTTP Testing
+- **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
+- **Multiple Ports**: Specify comma-separated ports like `80,443` with `-p` flag
+- **HTTP Version Control**: Force HTTP/1.0, 1.1, or 2.0 using `--http-version`
+- **Status Code Filtering**: Filter responses by status code using `-F`
+
+### Advanced Features
+- **Proxy Support**: Route traffic through proxy tools like Burp Suite using `-x` flag
+- **Custom Headers**: Add headers via `-H` flag (multiple allowed) or `--header-file`
+- **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
+- **TLS/SSL Options**: Allow insecure connections with `-k` flag
+- **Redirect Handling**: Follow redirects with `-L` flag
+- **Verbose Output**: View detailed response headers with `-v` flag
 
 ---
 
@@ -87,19 +104,21 @@ cargo install --path .
 ## Usage
 
 ```plaintext
-URL testing with multiple methods, ports, verbose logging, redirects, proxy, cookies, headers, and HTTP version support
+URL testing with support for multiple input formats (nmap, testssl, ProjectDiscovery), IPv4/IPv6, and various output formats
 
 Usage: terminus [OPTIONS]
 
 Options:
-  -u, --url <URL>                  Specify a single URL to check
-  -f, --file <FILE>                Specify a file containing a list of URLs to check
+  -u, --url <URL>                  Specify a single URL/IP to check
+  -f, --file <FILE>                Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)
   -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use ALL to test all methods
   -p, --port <PORTS>               Comma-separated ports to connect to (e.g., 80,443)
+  -6, --ipv6                       Enable IPv6 scanning
   -k, --insecure                   Allow insecure SSL connections
   -v, --verbose                    Enable verbose output with response headers
   -L, --follow                     Follow HTTP redirects
-  -o, --output <FILE>              Write results to file
+  -o, --output <FILE>              Output file base name (extension added based on format)
+      --output-format <FORMAT>     Output format: stdout, txt, json, html, all (default: stdout)
   -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
   -x, --proxy <PROXY>              Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)
   -H, --header <HEADER>            Add custom header (format: 'Name: Value'). Can be specified multiple times
@@ -114,17 +133,91 @@ Options:
 
 ### Examples
 
-**Test a single URL with a specific method**:
+#### Basic Usage
+
+**Test a single URL**:
 ```bash
-terminus -u http://example.com -X POST
+terminus -u http://example.com
 ```
 
-**Test multiple URLs from a file on multiple ports**:
+**Test an IPv4 address**:
+```bash
+terminus -u 192.168.1.1
+```
+
+**Test an IPv6 address**:
+```bash
+terminus -u "2001:db8::1" -6
+```
+
+**Test multiple URLs from a file**:
 ```bash
 terminus -f urls.txt -p 80,443 -X ALL
 ```
 
-**Test with proxy (e.g., Burp Suite)**:
+#### Input Format Examples
+
+**Parse nmap XML output**:
+```bash
+nmap -p80,443 -oX scan.xml target.com
+terminus -f scan.xml
+```
+
+**Parse nmap greppable output**:
+```bash
+nmap -p80,443 -oG scan.gnmap target.com
+terminus -f scan.gnmap
+```
+
+**Parse testssl.sh JSON output**:
+```bash
+testssl --json-pretty target.com > testssl.json
+terminus -f testssl.json
+```
+
+**Parse ProjectDiscovery tool output**:
+```bash
+echo "target.com" | katana -json -o katana.json
+terminus -f katana.json
+```
+
+#### Piping Examples
+
+**Chain with other tools**:
+```bash
+cat domains.txt | httpx | terminus
+```
+
+**Complex pipeline with nuclei**:
+```bash
+cat domains.txt | httpx -silent | nuclei -t cves/ -json | terminus
+```
+
+**Chain with subfinder and httprobe**:
+```bash
+subfinder -d target.com -silent | httprobe | terminus --output-format json -o results
+```
+
+#### Output Format Examples
+
+**Output to JSON**:
+```bash
+terminus -u http://example.com --output-format json -o scan_results
+```
+
+**Output to HTML**:
+```bash
+terminus -f urls.txt --output-format html -o scan_results
+```
+
+**Output to all formats**:
+```bash
+terminus -f urls.txt --output-format all -o scan_results
+```
+
+#### Advanced Examples
+
+**Test with proxy (Burp Suite)**:
 ```bash
 terminus -u https://example.com -x http://127.0.0.1:8080 -k
 ```
@@ -134,19 +227,9 @@ terminus -u https://example.com -x http://127.0.0.1:8080 -k
 terminus -u https://example.com -H "Authorization: Bearer token123" -H "X-Custom: value"
 ```
 
-**Test with headers from file**:
-```bash
-terminus -u https://example.com --header-file headers.txt
-```
-
 **Test with cookies**:
 ```bash
 terminus -u https://example.com -b "session=abc123; user=admin"
-```
-
-**Test with cookies from file**:
-```bash
-terminus -u https://example.com -c cookies.txt
 ```
 
 **Force HTTP/2**:
@@ -154,12 +237,7 @@ terminus -u https://example.com -c cookies.txt
 terminus -u https://example.com --http-version 2
 ```
 
-**Filter by status code and set a custom output directory**:
-```bash
-terminus -u http://example.com -X GET -F 404 -o ./custom_results
-```
-
-**Complex example with multiple features**:
+**Complete pentest workflow**:
 ```bash
 terminus -u https://api.example.com -X POST \
   -H "Content-Type: application/json" \
@@ -167,7 +245,8 @@ terminus -u https://api.example.com -X POST \
   -x http://127.0.0.1:8080 \
   -k -v -L \
   --http-version 2 \
-  -o results.txt
+  --output-format all \
+  -o pentest_results
 ```
 
 ---
