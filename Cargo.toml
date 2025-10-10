@@ -12,7 +12,7 @@ repository = "https://github.com/your_github/terminus"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 reqwest = { version = "0.12.22", features = ["blocking"] }
-rayon = "1.5.1"
+rayon = "1.11.0"
 anyhow = "1.0"
 log = "0.4"        # Add logging dependency
 env_logger = "0.11.8"
