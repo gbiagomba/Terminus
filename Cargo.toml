@@ -1,8 +1,8 @@
 [package]
 name = "terminus"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
-description = "CLI tool to check URL accessibility with support for multiple input formats, IPv4/IPv6, various output formats, smart diffing, pattern matching, and rate limiting."
+description = "CLI tool for HTTP endpoint testing with security analysis, passive vulnerability detection, smart diffing, and multi-format support."
 license = "GPL-3.0"
 authors = ["Gilles Biagomba<gilles.infosec@gmail.com>"]
 repository = "https://github.com/your_github/terminus"

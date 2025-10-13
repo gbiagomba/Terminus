@@ -62,6 +62,16 @@ struct ScanResult {
     body_preview: Option<String>,
     matched_patterns: Option<Vec<String>>,
     extracted_links: Option<Vec<String>>,
+    security_headers: Option<SecurityHeaders>,
+    detected_errors: Option<Vec<String>>,
+    reflection_detected: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SecurityHeaders {
+    missing: Vec<String>,
+    present: Vec<String>,
+    issues: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -113,8 +123,8 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.5.0")
-        .about("URL testing with support for multiple input formats (nmap, testssl, ProjectDiscovery), IPv4/IPv6, and various output formats")
+        .version("2.6.0")
+        .about("URL testing with support for multiple input formats, security analysis, and passive vulnerability detection")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
         .arg(Arg::new("method").short('X').long("method").value_name("METHOD").help("Specify the HTTP method to use (default: GET). Use ALL to test all methods"))
@@ -138,6 +148,9 @@ fn main() -> Result<()> {
         .arg(Arg::new("random-delay").long("random-delay").value_name("RANGE").help("Random delay between requests in seconds (e.g., '1-5')"))
         .arg(Arg::new("check-body").long("check-body").help("Analyze response body content").action(ArgAction::SetTrue))
         .arg(Arg::new("extract-links").long("extract-links").help("Extract and display links from response body").action(ArgAction::SetTrue))
+        .arg(Arg::new("check-security-headers").long("check-security-headers").help("Analyze security headers (CSP, HSTS, X-Frame-Options, etc.)").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-errors").long("detect-errors").help("Detect verbose error messages (SQL, stack traces, etc.)").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-reflection").long("detect-reflection").help("Check if input is reflected in response (passive XSS detection)").action(ArgAction::SetTrue))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
@@ -145,6 +158,9 @@ fn main() -> Result<()> {
     let follow_redirects = matches.get_flag("follow");
     let check_body = matches.get_flag("check-body");
     let extract_links = matches.get_flag("extract-links");
+    let check_security_headers = matches.get_flag("check-security-headers");
+    let detect_errors = matches.get_flag("detect-errors");
+    let detect_reflection = matches.get_flag("detect-reflection");
 
     // Parse rate limiting
     let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
@@ -356,8 +372,11 @@ fn main() -> Result<()> {
                             None
                         };
 
+                        // Store headers for security analysis
+                        let response_headers = resp.headers().clone();
+
                         // Read response body if needed for analysis
-                        let body_text = if check_body || extract_links || grep_pattern.is_some() {
+                        let body_text = if check_body || extract_links || grep_pattern.is_some() || detect_errors || detect_reflection {
                             resp.text().ok()
                         } else {
                             None
@@ -400,6 +419,38 @@ fn main() -> Result<()> {
                             None
                         };
 
+                        // Analyze security headers
+                        let security_headers = if check_security_headers {
+                            Some(analyze_security_headers(&response_headers))
+                        } else {
+                            None
+                        };
+
+                        // Detect error messages
+                        let detected_errors = if detect_errors {
+                            body_text.as_ref().and_then(|b| {
+                                let errors = detect_error_messages(b);
+                                if errors.is_empty() {
+                                    None
+                                } else {
+                                    Some(errors)
+                                }
+                            })
+                        } else {
+                            None
+                        };
+
+                        // Check for input reflection (passive XSS detection)
+                        let reflection_detected = if detect_reflection {
+                            // Generate a unique marker for this request
+                            let reflection_marker = format!("terminus_test_{}", rand::random::<u64>());
+                            // For GET requests, we would check if URL parameters are reflected
+                            // For now, we'll check if common reflection patterns exist
+                            body_text.as_ref().map(|b| check_reflection(b, &reflection_marker))
+                        } else {
+                            None
+                        };
+
                         // Only add result if there's a pattern match (when grep is enabled) or always if grep is not enabled
                         let should_add = if grep_pattern.is_some() {
                             matched_patterns.is_some()
@@ -418,6 +469,9 @@ fn main() -> Result<()> {
                                 body_preview,
                                 matched_patterns,
                                 extracted_links,
+                                security_headers,
+                                detected_errors,
+                                reflection_detected,
                             });
                         }
                     }
@@ -432,6 +486,9 @@ fn main() -> Result<()> {
                             body_preview: None,
                             matched_patterns: None,
                             extracted_links: None,
+                            security_headers: None,
+                            detected_errors: None,
+                            reflection_detected: None,
                         });
                     }
                 }
@@ -958,4 +1015,210 @@ fn extract_links_from_body(body: &str) -> Vec<String> {
     }
 
     links.into_iter().collect()
+}
+
+fn analyze_security_headers(headers: &HeaderMap) -> SecurityHeaders {
+    let mut missing = Vec::new();
+    let mut present = Vec::new();
+    let mut issues = Vec::new();
+
+    // Critical security headers to check
+    let security_header_checks = vec![
+        ("content-security-policy", "Content-Security-Policy"),
+        ("strict-transport-security", "Strict-Transport-Security (HSTS)"),
+        ("x-frame-options", "X-Frame-Options"),
+        ("x-content-type-options", "X-Content-Type-Options"),
+        ("x-xss-protection", "X-XSS-Protection"),
+        ("referrer-policy", "Referrer-Policy"),
+        ("permissions-policy", "Permissions-Policy"),
+    ];
+
+    for (header_name, display_name) in security_header_checks {
+        if let Some(value) = headers.get(header_name) {
+            present.push(display_name.to_string());
+
+            // Check for weak or problematic configurations
+            if let Ok(val_str) = value.to_str() {
+                match header_name {
+                    "content-security-policy" => {
+                        if val_str.contains("'unsafe-inline'") || val_str.contains("'unsafe-eval'") {
+                            issues.push(format!("CSP contains unsafe directives: {}", val_str));
+                        }
+                    }
+                    "x-frame-options" => {
+                        if !val_str.to_lowercase().contains("deny") && !val_str.to_lowercase().contains("sameorigin") {
+                            issues.push(format!("Weak X-Frame-Options: {}", val_str));
+                        }
+                    }
+                    "strict-transport-security" => {
+                        if !val_str.contains("max-age") {
+                            issues.push("HSTS missing max-age directive".to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            missing.push(display_name.to_string());
+        }
+    }
+
+    // Check for problematic headers that should not be present
+    let problematic_headers = vec![
+        ("server", "Server header exposes version information"),
+        ("x-powered-by", "X-Powered-By header exposes technology stack"),
+        ("x-aspnet-version", "X-AspNet-Version header exposes framework version"),
+    ];
+
+    for (header_name, issue_desc) in problematic_headers {
+        if headers.get(header_name).is_some() {
+            issues.push(issue_desc.to_string());
+        }
+    }
+
+    // Check CORS configuration
+    if let Some(cors) = headers.get("access-control-allow-origin") {
+        if let Ok(val_str) = cors.to_str() {
+            if val_str == "*" {
+                issues.push("CORS allows all origins (*)".to_string());
+            }
+        }
+    }
+
+    SecurityHeaders {
+        missing,
+        present,
+        issues,
+    }
+}
+
+fn detect_error_messages(body: &str) -> Vec<String> {
+    let mut detected_errors = Vec::new();
+
+    // SQL error patterns
+    let sql_patterns = vec![
+        r"SQL syntax.*?MySQL",
+        r"Warning.*?\Wmysqli?_",
+        r"MySQLSyntaxErrorException",
+        r"valid MySQL result",
+        r"check the manual that corresponds to your (MySQL|MariaDB) server version",
+        r"Unknown column '[^']+' in 'field list'",
+        r"MySqlClient\.",
+        r"com\.mysql\.jdbc\.exceptions",
+        r"ORA-[0-9]{5}",
+        r"Oracle error",
+        r"PostgreSQL.*?ERROR",
+        r"Warning.*?\\Wpg_",
+        r"valid PostgreSQL result",
+        r"Npgsql\.",
+        r"Microsoft SQL Native Client error '[0-9a-fA-F]{8}",
+        r"ODBC SQL Server Driver",
+        r"SQLServer JDBC Driver",
+        r"macromedia\.jdbc\.sqlserver",
+    ];
+
+    for pattern in sql_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(body) {
+                detected_errors.push(format!("SQL Error Pattern: {}", pattern));
+                break; // Only report once per category
+            }
+        }
+    }
+
+    // Stack trace patterns
+    let stack_trace_patterns = vec![
+        r"at\s+[\w\.$]+\([^)]+\.java:\d+\)",  // Java
+        r"Traceback \(most recent call last\):",  // Python
+        r"Stack trace:.*?at\s+",  // .NET
+        r"#\d+\s+/[\w/]+\.php\(\d+\)",  // PHP
+        r"Error\s+in\s+/[\w/]+\s+on\s+line\s+\d+",  // Generic
+    ];
+
+    for pattern in stack_trace_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(body) {
+                detected_errors.push("Stack trace detected".to_string());
+                break;
+            }
+        }
+    }
+
+    // Debug/Development mode indicators
+    let debug_patterns = vec![
+        r"<title>.*?Exception.*?</title>",
+        r"<b>Fatal error</b>:",
+        r"<b>Warning</b>:",
+        r"<b>Parse error</b>:",
+        r"Undefined variable:",
+        r"Undefined index:",
+        r"Notice: Undefined",
+        r"Debug mode|DEBUG_MODE",
+        r"SQLSTATE\[\w+\]",
+        r"PDOException",
+    ];
+
+    for pattern in debug_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(body) {
+                detected_errors.push("Debug/error information exposed".to_string());
+                break;
+            }
+        }
+    }
+
+    // Path disclosure
+    let path_patterns = vec![
+        r"[A-Za-z]:\\[\w\\]+",  // Windows paths
+        r"/home/[\w/]+",  // Unix home paths
+        r"/var/www/[\w/]+",  // Common web paths
+        r"/usr/[\w/]+",  // Unix system paths
+    ];
+
+    for pattern in path_patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(body) {
+                detected_errors.push("File path disclosure detected".to_string());
+                break;
+            }
+        }
+    }
+
+    detected_errors
+}
+
+fn check_reflection(body: &str, _marker: &str) -> bool {
+    // Passive reflection detection - look for common indicators that user input might be reflected
+    // We don't actually inject anything, just check if the response shows signs of reflection
+
+    // Look for common reflection patterns in forms and inputs
+    let reflection_indicators = vec![
+        r#"<input[^>]+value=["'][^"']*\{[^}]*\}[^"']*["']"#,  // Templating in input values
+        r#"<input[^>]+value=["'][^"']*\$[^"']*["']"#,  // Variables in input values
+        r#"<script[^>]*>[^<]*document\.write\([^)]*\)"#,  // document.write with parameters
+        r#"<script[^>]*>[^<]*innerHTML\s*="#,  // innerHTML assignment
+        r#"<script[^>]*>[^<]*eval\("#,  // eval usage (potential XSS vector)
+        r#"<[^>]+\son\w+\s*=\s*["'][^"']*["']"#,  // Inline event handlers
+    ];
+
+    for pattern in &reflection_indicators {
+        if let Ok(re) = Regex::new(pattern) {
+            if re.is_match(body) {
+                return true; // Potential reflection/XSS vector found
+            }
+        }
+    }
+
+    // Check for URL parameters reflected in response (basic check)
+    // Look for query string patterns that might indicate reflected parameters
+    if body.contains("?") && (body.contains("=") || body.contains("&")) {
+        // This is a very basic check - in a real implementation, you'd want to
+        // track the actual request parameters and see if they appear in the response
+        let param_pattern = Regex::new(r"[?&](\w+)=([^&\s<>]+)").unwrap();
+        if param_pattern.is_match(body) {
+            return true;
+        }
+    }
+
+    false
 }

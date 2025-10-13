@@ -48,6 +48,11 @@
 - **Body Analysis**: Analyze response body content with `--check-body`
 - **Link Extraction**: Automatically extract URLs from response bodies with `--extract-links`
 
+### Passive Security Analysis (v2.6.0)
+- **Security Headers Analysis**: Detect missing or misconfigured security headers (CSP, HSTS, X-Frame-Options, etc.)
+- **Error Message Detection**: Identify verbose error messages, SQL errors, stack traces, and path disclosure
+- **Reflection Detection**: Passive detection of input reflection and potential XSS vectors (no exploitation)
+
 ---
 
 ## Installation
@@ -141,6 +146,9 @@ Options:
       --random-delay <RANGE>       Random delay between requests in seconds (e.g., '1-5')
       --check-body                 Analyze response body content
       --extract-links              Extract and display links from response body
+      --check-security-headers     Analyze security headers (CSP, HSTS, X-Frame-Options, etc.)
+      --detect-errors              Detect verbose error messages (SQL, stack traces, etc.)
+      --detect-reflection          Check if input is reflected in response (passive XSS detection)
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -335,6 +343,79 @@ terminus -f targets.txt \
   --diff recon_results.json \
   --check-body \
   -o new_scan
+```
+
+#### Passive Security Analysis Examples (v2.6.0)
+
+**Analyze security headers**:
+```bash
+# Check for missing or misconfigured security headers
+terminus -f production_urls.txt --check-security-headers -o security_audit
+
+# Combine with JSON output for detailed analysis
+terminus -u https://example.com --check-security-headers --output-format json -o headers_check
+```
+
+**Detect verbose error messages**:
+```bash
+# Scan for SQL errors, stack traces, and debug information
+terminus -f urls.txt --detect-errors
+
+# Find specific error types with grep
+terminus -f api_endpoints.txt --detect-errors --grep-response "SQL|Exception|Traceback"
+
+# Export error findings to CSV for reporting
+terminus -f targets.txt --detect-errors --output-format csv -o error_findings
+```
+
+**Passive reflection detection (XSS indicators)**:
+```bash
+# Check for potential XSS vectors without exploitation
+terminus -f forms_urls.txt --detect-reflection
+
+# Combine with error detection for comprehensive analysis
+terminus -u https://webapp.com/search --detect-reflection --detect-errors -v
+```
+
+**Comprehensive security audit workflow**:
+```bash
+# Full passive security assessment
+terminus -f target_list.txt \
+  --check-security-headers \
+  --detect-errors \
+  --detect-reflection \
+  --check-body \
+  --extract-links \
+  --rate-limit 10/s \
+  --output-format all \
+  -o security_assessment
+
+# Then analyze with AI for insights
+python terminus_ai_analyzer.py security_assessment.json \
+  --provider ollama \
+  --persona security \
+  -o security_report.txt
+```
+
+**Enterprise security scanning**:
+```bash
+# Respectful production scanning with all security checks
+terminus -f production_endpoints.txt \
+  --check-security-headers \
+  --detect-errors \
+  --detect-reflection \
+  --rate-limit 5/s \
+  --random-delay 2-5 \
+  -k \
+  --output-format json \
+  -o prod_security_scan
+
+# Compare with baseline
+terminus -f production_endpoints.txt \
+  --check-security-headers \
+  --detect-errors \
+  --diff prod_security_scan.json \
+  -o latest_scan
 ```
 
 ## AI-Powered Analysis

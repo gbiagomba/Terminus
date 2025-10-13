@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2025-10-13
+
+### Added
+- **Passive Security Analysis**: Three new defensive security features for ethical assessment
+  - `--check-security-headers`: Analyze HTTP security headers
+    - Detects missing headers: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, etc.
+    - Identifies weak configurations (unsafe CSP directives, permissive CORS, etc.)
+    - Flags information disclosure (Server, X-Powered-By headers)
+  - `--detect-errors`: Detect verbose error messages and information disclosure
+    - SQL error patterns (MySQL, PostgreSQL, Oracle, SQL Server)
+    - Stack traces (Java, Python, .NET, PHP)
+    - Debug/development mode indicators
+    - File path disclosure (Windows/Unix paths)
+  - `--detect-reflection`: Passive XSS vector detection
+    - Identifies potential input reflection patterns
+    - Detects unsafe JavaScript patterns (eval, innerHTML, document.write)
+    - Checks for inline event handlers
+    - **NOTE**: Passive detection only - no exploitation attempts
+
+### Changed
+- Updated `ScanResult` struct to include new security analysis fields:
+  - `security_headers`: SecurityHeaders with missing/present/issues
+  - `detected_errors`: Vec of detected error message types
+  - `reflection_detected`: Boolean flag for potential XSS vectors
+- Enhanced response body reading to support security analysis features
+- Updated tool description to emphasize security analysis capabilities
+- Improved help text with clear descriptions of passive security features
+
+### Security
+- All security features are passive and defensive only
+- No exploitation or active vulnerability testing
+- Designed for ethical security assessment with proper authorization
+- Suitable for production environment scanning with rate limiting
+
+### Examples
+```bash
+# Check security headers
+terminus -f urls.txt --check-security-headers --output-format json -o audit
+
+# Detect error messages and information disclosure
+terminus -f api_endpoints.txt --detect-errors --detect-reflection
+
+# Comprehensive security assessment
+terminus -f targets.txt \
+  --check-security-headers \
+  --detect-errors \
+  --detect-reflection \
+  --rate-limit 10/s \
+  --output-format all \
+  -o security_assessment
+```
+
 ## [2.5.0] - 2025-10-10
 
 ### Added
