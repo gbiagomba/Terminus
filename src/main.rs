@@ -65,6 +65,17 @@ struct ScanResult {
     security_headers: Option<SecurityHeaders>,
     detected_errors: Option<Vec<String>>,
     reflection_detected: Option<bool>,
+    http2_desync: Option<Http2DesyncResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Http2DesyncResult {
+    desync_detected: bool,
+    http1_status: u16,
+    http2_status: u16,
+    status_mismatch: bool,
+    response_diff: Option<String>,
+    issues: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -123,8 +134,8 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.6.0")
-        .about("URL testing with support for multiple input formats, security analysis, and passive vulnerability detection")
+        .version("2.7.0")
+        .about("URL testing with HTTP/2 desync detection, security analysis, and passive vulnerability detection")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
         .arg(Arg::new("method").short('X').long("method").value_name("METHOD").help("Specify the HTTP method to use (default: GET). Use ALL to test all methods"))
@@ -151,6 +162,7 @@ fn main() -> Result<()> {
         .arg(Arg::new("check-security-headers").long("check-security-headers").help("Analyze security headers (CSP, HSTS, X-Frame-Options, etc.)").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-errors").long("detect-errors").help("Detect verbose error messages (SQL, stack traces, etc.)").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-reflection").long("detect-reflection").help("Check if input is reflected in response (passive XSS detection)").action(ArgAction::SetTrue))
+        .arg(Arg::new("http2-desync-check").long("http2-desync-check").help("Test HTTP/2 to HTTP/1.1 downgrade handling (detects potential request smuggling)").action(ArgAction::SetTrue))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
@@ -161,6 +173,7 @@ fn main() -> Result<()> {
     let check_security_headers = matches.get_flag("check-security-headers");
     let detect_errors = matches.get_flag("detect-errors");
     let detect_reflection = matches.get_flag("detect-reflection");
+    let http2_desync_check = matches.get_flag("http2-desync-check");
 
     // Parse rate limiting
     let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
@@ -458,6 +471,13 @@ fn main() -> Result<()> {
                             true
                         };
 
+                        // Perform HTTP/2 desync check if requested
+                        let http2_desync = if http2_desync_check && full_url.starts_with("https") {
+                            Some(perform_http2_desync_check(&client, &full_url, &req_method, &custom_headers, status.as_u16()))
+                        } else {
+                            None
+                        };
+
                         if should_add {
                             results.push(ScanResult {
                                 url: url.clone(),
@@ -472,6 +492,7 @@ fn main() -> Result<()> {
                                 security_headers,
                                 detected_errors,
                                 reflection_detected,
+                                http2_desync,
                             });
                         }
                     }
@@ -489,6 +510,7 @@ fn main() -> Result<()> {
                             security_headers: None,
                             detected_errors: None,
                             reflection_detected: None,
+                            http2_desync: None,
                         });
                     }
                 }
@@ -1221,4 +1243,169 @@ fn check_reflection(body: &str, _marker: &str) -> bool {
     }
 
     false
+}
+
+fn perform_http2_desync_check(
+    _client: &reqwest::blocking::Client,
+    url: &str,
+    method: &Method,
+    headers: &HeaderMap,
+    http1_status: u16,
+) -> Http2DesyncResult {
+    let mut issues = Vec::new();
+    let mut desync_detected = false;
+    let mut http2_status = 0;
+    let mut status_mismatch = false;
+    let mut response_diff = None;
+
+    // Create separate clients for HTTP/1.1 and HTTP/2
+    let http1_client = match ClientBuilder::new()
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            issues.push(format!("Failed to create HTTP/1.1 client: {}", e));
+            return Http2DesyncResult {
+                desync_detected: false,
+                http1_status,
+                http2_status: 0,
+                status_mismatch: false,
+                response_diff: Some("Unable to perform desync check".to_string()),
+                issues,
+            };
+        }
+    };
+
+    let http2_client = match ClientBuilder::new()
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .http2_prior_knowledge()
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            issues.push(format!("Failed to create HTTP/2 client: {}", e));
+            return Http2DesyncResult {
+                desync_detected: false,
+                http1_status,
+                http2_status: 0,
+                status_mismatch: false,
+                response_diff: Some("Unable to perform desync check".to_string()),
+                issues,
+            };
+        }
+    };
+
+    // Make HTTP/1.1 request
+    let http1_response = match http1_client
+        .request(method.clone(), url)
+        .headers(headers.clone())
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("HTTP/1.1 request failed: {}", e));
+            return Http2DesyncResult {
+                desync_detected: false,
+                http1_status,
+                http2_status: 0,
+                status_mismatch: false,
+                response_diff: Some("HTTP/1.1 request failed".to_string()),
+                issues,
+            };
+        }
+    };
+
+    let http1_final_status = http1_response.status().as_u16();
+    let http1_body = http1_response.text().unwrap_or_default();
+
+    // Make HTTP/2 request
+    let http2_response = match http2_client
+        .request(method.clone(), url)
+        .headers(headers.clone())
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("HTTP/2 request failed: {}", e));
+            // If HTTP/2 fails completely, it might indicate the server doesn't support HTTP/2
+            // or there's a configuration issue
+            return Http2DesyncResult {
+                desync_detected: false,
+                http1_status: http1_final_status,
+                http2_status: 0,
+                status_mismatch: false,
+                response_diff: Some("HTTP/2 not supported or request failed".to_string()),
+                issues,
+            };
+        }
+    };
+
+    http2_status = http2_response.status().as_u16();
+    let http2_body = http2_response.text().unwrap_or_default();
+
+    // Compare status codes
+    if http1_final_status != http2_status {
+        status_mismatch = true;
+        desync_detected = true;
+        issues.push(format!(
+            "Status code mismatch: HTTP/1.1 returned {} but HTTP/2 returned {}",
+            http1_final_status, http2_status
+        ));
+    }
+
+    // Compare response body lengths for significant differences
+    let body_length_diff = (http1_body.len() as i64 - http2_body.len() as i64).abs();
+    if body_length_diff > 100 {
+        desync_detected = true;
+        issues.push(format!(
+            "Significant response body length difference: HTTP/1.1={} bytes, HTTP/2={} bytes (diff={})",
+            http1_body.len(),
+            http2_body.len(),
+            body_length_diff
+        ));
+        response_diff = Some(format!(
+            "Body length: HTTP/1.1={}, HTTP/2={}",
+            http1_body.len(),
+            http2_body.len()
+        ));
+    }
+
+    // Check for common desync indicators in responses
+    let desync_patterns = vec![
+        "Transfer-Encoding",
+        "Content-Length",
+        "chunked",
+    ];
+
+    for pattern in &desync_patterns {
+        let http1_has = http1_body.contains(pattern) || http1_body.to_lowercase().contains(&pattern.to_lowercase());
+        let http2_has = http2_body.contains(pattern) || http2_body.to_lowercase().contains(&pattern.to_lowercase());
+
+        if http1_has != http2_has {
+            desync_detected = true;
+            issues.push(format!(
+                "Encoding discrepancy detected: '{}' present in {} but not in {}",
+                pattern,
+                if http1_has { "HTTP/1.1" } else { "HTTP/2" },
+                if http1_has { "HTTP/2" } else { "HTTP/1.1" }
+            ));
+        }
+    }
+
+    // If no issues found
+    if issues.is_empty() && !desync_detected {
+        issues.push("No HTTP/2 desync issues detected".to_string());
+    }
+
+    Http2DesyncResult {
+        desync_detected,
+        http1_status: http1_final_status,
+        http2_status,
+        status_mismatch,
+        response_diff,
+        issues,
+    }
 }

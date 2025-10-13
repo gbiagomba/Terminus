@@ -53,6 +53,13 @@
 - **Error Message Detection**: Identify verbose error messages, SQL errors, stack traces, and path disclosure
 - **Reflection Detection**: Passive detection of input reflection and potential XSS vectors (no exploitation)
 
+### HTTP/2 Desync Detection (v2.7.0)
+- **HTTP/2 Downgrade Testing**: Compare HTTP/1.1 vs HTTP/2 responses to detect desync vulnerabilities (CWE-444)
+- **Request Smuggling Detection**: Identify potential HTTP request smuggling vectors from HTTP/2 to HTTP/1.1 translation
+- **CDN/Proxy Analysis**: Test for misconfiguration in CDN and reverse proxy HTTP/2 downgrade handling
+- **Status Code Comparison**: Detect discrepancies in status codes between HTTP versions
+- **Response Body Analysis**: Compare response body lengths and content for HTTP version differences
+
 ---
 
 ## Installation
@@ -416,6 +423,106 @@ terminus -f production_endpoints.txt \
   --detect-errors \
   --diff prod_security_scan.json \
   -o latest_scan
+```
+
+#### HTTP/2 Desync Detection Examples (v2.7.0)
+
+**Test HTTP/2 to HTTP/1.1 downgrade handling**:
+```bash
+# Basic HTTP/2 desync check on a single target
+terminus -u https://api.example.com --http2-desync-check -k
+
+# Check multiple endpoints for desync vulnerabilities
+terminus -f https_endpoints.txt --http2-desync-check --output-format json -o desync_scan
+```
+
+**Detect request smuggling vectors**:
+```bash
+# Test for HTTP/2 downgrade issues with specific HTTP methods
+terminus -u https://target.com/api/endpoint \
+  -X POST \
+  --http2-desync-check \
+  -k \
+  --output-format json \
+  -o smuggling_test
+
+# Test multiple methods for desync vulnerabilities
+terminus -u https://api.target.com \
+  -X ALL \
+  --http2-desync-check \
+  --rate-limit 5/s \
+  -k \
+  -o method_desync_scan
+```
+
+**Combine with other security checks**:
+```bash
+# Comprehensive HTTP/2 security assessment
+terminus -f production_apis.txt \
+  --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --check-body \
+  --rate-limit 10/s \
+  --output-format all \
+  -k \
+  -o http2_security_audit
+
+# Proxy through Burp Suite for manual analysis
+terminus -u https://target.com/vulnerable/endpoint \
+  --http2-desync-check \
+  -x http://127.0.0.1:8080 \
+  -k \
+  -v \
+  --output-format json \
+  -o burp_desync_test
+```
+
+**Enterprise CDN/proxy testing**:
+```bash
+# Test CDN endpoints for HTTP/2 downgrade issues
+terminus -f cdn_endpoints.txt \
+  --http2-desync-check \
+  --rate-limit 5/s \
+  --random-delay 2-4 \
+  -k \
+  --output-format json \
+  -o cdn_desync_scan
+
+# Compare desync results over time
+terminus -f api_endpoints.txt \
+  --http2-desync-check \
+  --diff previous_desync_scan.json \
+  -k \
+  -o latest_desync_scan
+
+# Test with custom headers to bypass WAF/CDN
+terminus -u https://target.com/api \
+  --http2-desync-check \
+  -H "X-Forwarded-For: 127.0.0.1" \
+  -H "User-Agent: Mozilla/5.0" \
+  -k \
+  --output-format json \
+  -o waf_bypass_desync_test
+```
+
+**Automated desync detection workflow**:
+```bash
+# Full HTTP/2 desync assessment pipeline
+echo "target.com" | httpx -silent | \
+terminus --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --rate-limit 10/s \
+  -k \
+  --output-format json \
+  -o desync_findings
+
+# Analyze findings with AI
+python terminus_ai_analyzer.py desync_findings.json \
+  --provider ollama \
+  --persona security \
+  -o desync_analysis.txt
 ```
 
 ## AI-Powered Analysis

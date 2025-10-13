@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2025-10-13
+
+### Added
+- **HTTP/2 Desync Detection**: Passive detection of HTTP/2 to HTTP/1.1 downgrade vulnerabilities (CWE-444)
+  - `--http2-desync-check`: Compare HTTP/1.1 vs HTTP/2 responses to identify request smuggling vectors
+  - Automatic status code comparison between HTTP versions
+  - Response body length analysis for detecting significant differences
+  - Detection of Transfer-Encoding and Content-Length discrepancies
+  - Identifies potential HTTP request smuggling vulnerabilities in CDN/proxy configurations
+  - **NOTE**: Only works with HTTPS URLs (HTTP/2 requires TLS)
+
+### Changed
+- Updated `ScanResult` struct to include new `http2_desync` field of type `Http2DesyncResult`
+- Enhanced tool description to emphasize HTTP/2 desync detection capabilities
+- Improved help text with clear description of HTTP/2 desync testing feature
+- Updated Cargo.toml version to 2.7.0 and description to include HTTP/2 desync detection
+
+### Security
+- HTTP/2 desync detection is passive and defensive only
+- No exploitation or active vulnerability testing
+- Designed for authorized security assessment of HTTP/2 downgrade handling
+- Identifies misconfigurations that could lead to HTTP request smuggling attacks
+- Based on PortSwigger research on CDN/proxy HTTP/2 to HTTP/1.1 downgrade issues
+
+### Examples
+```bash
+# Basic HTTP/2 desync check
+terminus -u https://api.example.com --http2-desync-check -k
+
+# Comprehensive HTTP/2 security assessment
+terminus -f production_apis.txt \
+  --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --rate-limit 10/s \
+  --output-format json \
+  -o http2_audit
+
+# Test with custom headers through proxy
+terminus -u https://target.com/api \
+  --http2-desync-check \
+  -H "X-Forwarded-For: 127.0.0.1" \
+  -x http://127.0.0.1:8080 \
+  -k \
+  -v
+```
+
 ## [2.6.0] - 2025-10-13
 
 ### Added
