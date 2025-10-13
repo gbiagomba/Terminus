@@ -415,7 +415,7 @@ fn main() -> Result<()> {
                 // Apply random delay if configured
                 if let Some((min, max)) = random_delay_range {
                     use rand::Rng;
-                    let delay = rand::thread_rng().gen_range(min..=max);
+                    let delay = rand::rng().random_range(min..=max);
                     std::thread::sleep(std::time::Duration::from_secs(delay));
                 }
 
@@ -1342,7 +1342,7 @@ fn perform_http2_desync_check(
 ) -> Http2DesyncResult {
     let mut issues = Vec::new();
     let mut desync_detected = false;
-    let mut http2_status = 0;
+    let http2_status;
     let mut status_mismatch = false;
     let mut response_diff = None;
 

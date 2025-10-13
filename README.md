@@ -5,6 +5,35 @@
 
 `terminus` is a command-line tool designed to test the accessibility of URLs without authentication, using various HTTP methods. It's particularly useful for identifying unprotected paths to web servers that require authentication, helping to expose potential security vulnerabilities. The tool supports individual URLs or lists from files, custom HTTP methods, multiple ports, and concurrent execution.
 
+## Table of Contents
+
+- [Features](#features)
+  - [Input Sources](#input-sources)
+  - [Output Options](#output-options)
+  - [HTTP Testing](#http-testing)
+  - [Advanced Features](#advanced-features)
+  - [Smart Analysis Features](#smart-analysis-features-v250)
+  - [Passive Security Analysis](#passive-security-analysis-v260)
+  - [HTTP/2 Desync Detection](#http2-desync-detection-v270)
+  - [Advanced Passive Vulnerability Detection](#advanced-passive-vulnerability-detection-v280)
+- [Installation](#installation)
+  - [Using the Makefile](#using-the-makefile)
+- [Usage](#usage)
+  - [Examples](#examples)
+    - [Basic Usage](#basic-usage)
+    - [Input Format Examples](#input-format-examples)
+    - [Piping Examples](#piping-examples)
+    - [Output Format Examples](#output-format-examples)
+    - [Advanced Examples](#advanced-examples)
+    - [Smart Analysis Examples](#smart-analysis-examples-v250)
+    - [Passive Security Analysis Examples](#passive-security-analysis-examples-v260)
+    - [HTTP/2 Desync Detection Examples](#http2-desync-detection-examples-v270)
+    - [Advanced Passive Vulnerability Detection Examples](#advanced-passive-vulnerability-detection-examples-v280)
+- [AI-Powered Analysis](#ai-powered-analysis)
+- [HTTP Methods Tested](#http-methods-tested)
+- [Contributing](#contributing)
+- [License](#license)
+
 ---
 
 ## Features
