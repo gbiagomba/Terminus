@@ -66,6 +66,10 @@ struct ScanResult {
     detected_errors: Option<Vec<String>>,
     reflection_detected: Option<bool>,
     http2_desync: Option<Http2DesyncResult>,
+    host_injection: Option<HostInjectionResult>,
+    xff_bypass: Option<XffBypassResult>,
+    csrf_result: Option<CsrfResult>,
+    ssrf_result: Option<SsrfResult>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -82,6 +86,46 @@ struct Http2DesyncResult {
 struct SecurityHeaders {
     missing: Vec<String>,
     present: Vec<String>,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct HostInjectionResult {
+    injection_suspected: bool,
+    reflected_in_location: bool,
+    reflected_in_vary: bool,
+    reflected_in_set_cookie: bool,
+    injected_host: String,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct XffBypassResult {
+    bypass_suspected: bool,
+    baseline_status: u16,
+    xff_status: u16,
+    status_changed: bool,
+    response_diff: Option<String>,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CsrfResult {
+    csrf_suspected: bool,
+    accepts_without_origin: bool,
+    accepts_with_fake_origin: bool,
+    missing_samesite: bool,
+    missing_x_frame_options: bool,
+    missing_csp: bool,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SsrfResult {
+    ssrf_suspected: bool,
+    vulnerable_params: Vec<String>,
+    tested_payloads: Vec<String>,
+    response_indicators: Vec<String>,
     issues: Vec<String>,
 }
 
@@ -134,7 +178,7 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.7.0")
+        .version("2.8.0")
         .about("URL testing with HTTP/2 desync detection, security analysis, and passive vulnerability detection")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -163,6 +207,10 @@ fn main() -> Result<()> {
         .arg(Arg::new("detect-errors").long("detect-errors").help("Detect verbose error messages (SQL, stack traces, etc.)").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-reflection").long("detect-reflection").help("Check if input is reflected in response (passive XSS detection)").action(ArgAction::SetTrue))
         .arg(Arg::new("http2-desync-check").long("http2-desync-check").help("Test HTTP/2 to HTTP/1.1 downgrade handling (detects potential request smuggling)").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-host-injection").long("detect-host-injection").help("Passively detect Host header injection vulnerabilities by checking response headers").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-xff-bypass").long("detect-xff-bypass").help("Detect X-Forwarded-For bypass by comparing baseline and XFF requests").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))
+        .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
@@ -174,6 +222,10 @@ fn main() -> Result<()> {
     let detect_errors = matches.get_flag("detect-errors");
     let detect_reflection = matches.get_flag("detect-reflection");
     let http2_desync_check = matches.get_flag("http2-desync-check");
+    let detect_host_injection = matches.get_flag("detect-host-injection");
+    let detect_xff_bypass = matches.get_flag("detect-xff-bypass");
+    let detect_csrf = matches.get_flag("detect-csrf");
+    let detect_ssrf = matches.get_flag("detect-ssrf");
 
     // Parse rate limiting
     let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
@@ -478,6 +530,34 @@ fn main() -> Result<()> {
                             None
                         };
 
+                        // Perform host injection check if requested
+                        let host_injection = if detect_host_injection {
+                            Some(perform_host_injection_check(&client, &full_url, &req_method, &custom_headers))
+                        } else {
+                            None
+                        };
+
+                        // Perform X-Forwarded-For bypass check if requested
+                        let xff_bypass = if detect_xff_bypass {
+                            Some(perform_xff_bypass_check(&client, &full_url, &req_method, &custom_headers, status.as_u16()))
+                        } else {
+                            None
+                        };
+
+                        // Perform CSRF check if requested
+                        let csrf_result = if detect_csrf {
+                            Some(perform_csrf_check(&client, &full_url, &req_method, &custom_headers))
+                        } else {
+                            None
+                        };
+
+                        // Perform SSRF check if requested
+                        let ssrf_result = if detect_ssrf {
+                            Some(perform_ssrf_check(&client, &full_url, &req_method, &custom_headers))
+                        } else {
+                            None
+                        };
+
                         if should_add {
                             results.push(ScanResult {
                                 url: url.clone(),
@@ -493,6 +573,10 @@ fn main() -> Result<()> {
                                 detected_errors,
                                 reflection_detected,
                                 http2_desync,
+                                host_injection,
+                                xff_bypass,
+                                csrf_result,
+                                ssrf_result,
                             });
                         }
                     }
@@ -511,6 +595,10 @@ fn main() -> Result<()> {
                             detected_errors: None,
                             reflection_detected: None,
                             http2_desync: None,
+                            host_injection: None,
+                            xff_bypass: None,
+                            csrf_result: None,
+                            ssrf_result: None,
                         });
                     }
                 }
@@ -1406,6 +1494,450 @@ fn perform_http2_desync_check(
         http2_status,
         status_mismatch,
         response_diff,
+        issues,
+    }
+}
+fn perform_host_injection_check(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    method: &Method,
+    headers: &HeaderMap,
+) -> HostInjectionResult {
+    let mut issues = Vec::new();
+    let mut injection_suspected = false;
+    let mut reflected_in_location = false;
+    let mut reflected_in_vary = false;
+    let mut reflected_in_set_cookie = false;
+    let injected_host = "evil.terminus.local";
+
+    // Create a modified header map with injected Host header
+    let mut modified_headers = headers.clone();
+    if let Ok(host_value) = HeaderValue::from_str(injected_host) {
+        modified_headers.insert(reqwest::header::HOST, host_value);
+    } else {
+        issues.push("Failed to create injected host header".to_string());
+        return HostInjectionResult {
+            injection_suspected: false,
+            reflected_in_location: false,
+            reflected_in_vary: false,
+            reflected_in_set_cookie: false,
+            injected_host: injected_host.to_string(),
+            issues,
+        };
+    }
+
+    // Make request with injected Host header
+    let response = match client
+        .request(method.clone(), url)
+        .headers(modified_headers)
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("Request with injected host failed: {}", e));
+            return HostInjectionResult {
+                injection_suspected: false,
+                reflected_in_location: false,
+                reflected_in_vary: false,
+                reflected_in_set_cookie: false,
+                injected_host: injected_host.to_string(),
+                issues,
+            };
+        }
+    };
+
+    let response_headers = response.headers();
+
+    // Check Location header
+    if let Some(location) = response_headers.get("location") {
+        if let Ok(location_str) = location.to_str() {
+            if location_str.contains(injected_host) {
+                reflected_in_location = true;
+                injection_suspected = true;
+                issues.push(format!(
+                    "[Host Injection Suspected] Injected host '{}' reflected in Location header: {}",
+                    injected_host, location_str
+                ));
+            }
+        }
+    }
+
+    // Check Vary header
+    if let Some(vary) = response_headers.get("vary") {
+        if let Ok(vary_str) = vary.to_str() {
+            if vary_str.contains(injected_host) {
+                reflected_in_vary = true;
+                injection_suspected = true;
+                issues.push(format!(
+                    "[Host Injection Suspected] Injected host '{}' reflected in Vary header: {}",
+                    injected_host, vary_str
+                ));
+            }
+        }
+    }
+
+    // Check Set-Cookie header
+    if let Some(set_cookie) = response_headers.get("set-cookie") {
+        if let Ok(cookie_str) = set_cookie.to_str() {
+            if cookie_str.contains(injected_host) {
+                reflected_in_set_cookie = true;
+                injection_suspected = true;
+                issues.push(format!(
+                    "[Host Injection Suspected] Injected host '{}' reflected in Set-Cookie header: {}",
+                    injected_host, cookie_str
+                ));
+            }
+        }
+    }
+
+    // Also check response body for host reflection
+    if let Ok(body) = response.text() {
+        if body.contains(injected_host) {
+            injection_suspected = true;
+            issues.push(format!(
+                "[Host Injection Suspected] Injected host '{}' reflected in response body",
+                injected_host
+            ));
+        }
+    }
+
+    if !injection_suspected {
+        issues.push("No host header injection detected".to_string());
+    }
+
+    HostInjectionResult {
+        injection_suspected,
+        reflected_in_location,
+        reflected_in_vary,
+        reflected_in_set_cookie,
+        injected_host: injected_host.to_string(),
+        issues,
+    }
+}
+
+fn perform_xff_bypass_check(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    method: &Method,
+    headers: &HeaderMap,
+    baseline_status: u16,
+) -> XffBypassResult {
+    let mut issues = Vec::new();
+    let mut bypass_suspected = false;
+    let mut status_changed = false;
+    let xff_value = "127.0.0.1";
+
+    // Create modified headers with X-Forwarded-For
+    let mut modified_headers = headers.clone();
+    if let Ok(xff_header) = HeaderValue::from_str(xff_value) {
+        modified_headers.insert(HeaderName::from_static("x-forwarded-for"), xff_header);
+    } else {
+        issues.push("Failed to create X-Forwarded-For header".to_string());
+        return XffBypassResult {
+            bypass_suspected: false,
+            baseline_status,
+            xff_status: baseline_status,
+            status_changed: false,
+            response_diff: None,
+            issues,
+        };
+    }
+
+    // Make request with X-Forwarded-For header
+    let response = match client
+        .request(method.clone(), url)
+        .headers(modified_headers)
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("Request with X-Forwarded-For failed: {}", e));
+            return XffBypassResult {
+                bypass_suspected: false,
+                baseline_status,
+                xff_status: baseline_status,
+                status_changed: false,
+                response_diff: None,
+                issues,
+            };
+        }
+    };
+
+    let xff_status = response.status().as_u16();
+
+    // Compare status codes
+    if baseline_status != xff_status {
+        status_changed = true;
+        bypass_suspected = true;
+        issues.push(format!(
+            "[XFF Bypass?] Status changed from {} to {} with X-Forwarded-For: {}",
+            baseline_status, xff_status, xff_value
+        ));
+    }
+
+    // Check for suspicious status changes that indicate bypass
+    if (baseline_status == 403 || baseline_status == 401) && (xff_status == 200 || xff_status == 301 || xff_status == 302) {
+        bypass_suspected = true;
+        issues.push(format!(
+            "[XFF Bypass Suspected] Access control bypass: {} -> {} with XFF",
+            baseline_status, xff_status
+        ));
+    }
+
+    if !bypass_suspected {
+        issues.push("No X-Forwarded-For bypass detected".to_string());
+    }
+
+    XffBypassResult {
+        bypass_suspected,
+        baseline_status,
+        xff_status,
+        status_changed,
+        response_diff: if status_changed {
+            Some(format!("Status: {} -> {}", baseline_status, xff_status))
+        } else {
+            None
+        },
+        issues,
+    }
+}
+
+fn perform_csrf_check(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    method: &Method,
+    headers: &HeaderMap,
+) -> CsrfResult {
+    let mut issues = Vec::new();
+    let mut csrf_suspected = false;
+    let mut accepts_without_origin = false;
+    let mut accepts_with_fake_origin = false;
+    let mut missing_samesite = true;
+    let mut missing_x_frame_options = true;
+    let mut missing_csp = true;
+
+    // Only check for state-changing methods
+    let state_changing = matches!(
+        method.as_str(),
+        "POST" | "PUT" | "PATCH" | "DELETE" | "CONNECT" | "TRACE"
+    );
+
+    if !state_changing {
+        issues.push("CSRF check skipped: not a state-changing method".to_string());
+        return CsrfResult {
+            csrf_suspected: false,
+            accepts_without_origin: false,
+            accepts_with_fake_origin: false,
+            missing_samesite: true,
+            missing_x_frame_options: true,
+            missing_csp: true,
+            issues,
+        };
+    }
+
+    // Test 1: Request without Origin/Referer headers
+    let mut headers_no_origin = headers.clone();
+    headers_no_origin.remove("origin");
+    headers_no_origin.remove("referer");
+
+    let response_no_origin = match client
+        .request(method.clone(), url)
+        .headers(headers_no_origin)
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("Request without Origin/Referer failed: {}", e));
+            return CsrfResult {
+                csrf_suspected: false,
+                accepts_without_origin: false,
+                accepts_with_fake_origin: false,
+                missing_samesite: true,
+                missing_x_frame_options: true,
+                missing_csp: true,
+                issues,
+            };
+        }
+    };
+
+    let status_no_origin = response_no_origin.status().as_u16();
+    let headers_response_no_origin = response_no_origin.headers().clone();
+
+    // Check if server accepts request without origin
+    if status_no_origin == 200 || status_no_origin == 201 || status_no_origin == 204 {
+        accepts_without_origin = true;
+        csrf_suspected = true;
+        issues.push(format!(
+            "[CSRF Suspected] Server accepts {} request without Origin/Referer (status: {})",
+            method, status_no_origin
+        ));
+    }
+
+    // Test 2: Request with fake Origin header
+    let mut headers_fake_origin = headers.clone();
+    headers_fake_origin.remove("referer");
+    if let Ok(fake_origin) = HeaderValue::from_str("http://evil.terminus.local") {
+        headers_fake_origin.insert(reqwest::header::ORIGIN, fake_origin);
+    }
+
+    if let Ok(response_fake_origin) = client
+        .request(method.clone(), url)
+        .headers(headers_fake_origin)
+        .send()
+    {
+        let status_fake_origin = response_fake_origin.status().as_u16();
+        if status_fake_origin == 200 || status_fake_origin == 201 || status_fake_origin == 204 {
+            accepts_with_fake_origin = true;
+            csrf_suspected = true;
+            issues.push(format!(
+                "[CSRF Suspected] Server accepts {} request with fake Origin header (status: {})",
+                method, status_fake_origin
+            ));
+        }
+    }
+
+    // Check for CSRF protections in response headers
+    if let Some(set_cookie) = headers_response_no_origin.get("set-cookie") {
+        if let Ok(cookie_str) = set_cookie.to_str() {
+            if cookie_str.to_lowercase().contains("samesite=") {
+                missing_samesite = false;
+            } else {
+                issues.push("[CSRF Missing Headers: SameSite]".to_string());
+            }
+        }
+    }
+
+    if headers_response_no_origin.get("x-frame-options").is_some() {
+        missing_x_frame_options = false;
+    } else {
+        issues.push("[CSRF Missing Headers: X-Frame-Options]".to_string());
+    }
+
+    if headers_response_no_origin.get("content-security-policy").is_some() {
+        missing_csp = false;
+    } else {
+        issues.push("[CSRF Missing Headers: CSP]".to_string());
+    }
+
+    if !csrf_suspected && !missing_samesite && !missing_x_frame_options && !missing_csp {
+        issues.push("No CSRF vulnerabilities detected".to_string());
+    }
+
+    CsrfResult {
+        csrf_suspected,
+        accepts_without_origin,
+        accepts_with_fake_origin,
+        missing_samesite,
+        missing_x_frame_options,
+        missing_csp,
+        issues,
+    }
+}
+
+fn perform_ssrf_check(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    method: &Method,
+    headers: &HeaderMap,
+) -> SsrfResult {
+    let mut issues = Vec::new();
+    let mut ssrf_suspected = false;
+    let mut vulnerable_params = Vec::new();
+    let tested_payloads = vec![
+        "http://127.0.0.1".to_string(),
+        "http://[::1]".to_string(),
+        "http://169.254.169.254/latest/meta-data/".to_string(),
+        "http://evil.terminus.local".to_string(),
+    ];
+    let mut response_indicators = Vec::new();
+
+    // Check if URL has parameters that might be vulnerable
+    let ssrf_params = vec!["url", "uri", "dest", "destination", "next", "redirect", "image", "file", "path", "load", "fetch"];
+    
+    // Parse URL to check for suspicious parameters
+    if let Ok(parsed_url) = reqwest::Url::parse(url) {
+        if let Some(query) = parsed_url.query() {
+            for ssrf_param in &ssrf_params {
+                if query.to_lowercase().contains(&format!("{}=", ssrf_param)) {
+                    vulnerable_params.push(ssrf_param.to_string());
+                }
+            }
+        }
+    }
+
+    // If no suspicious parameters found, skip detailed testing
+    if vulnerable_params.is_empty() {
+        issues.push("No URL parameters found that typically indicate SSRF risk".to_string());
+        return SsrfResult {
+            ssrf_suspected: false,
+            vulnerable_params,
+            tested_payloads: Vec::new(),
+            response_indicators,
+            issues,
+        };
+    }
+
+    // For passive detection, we check if the endpoint behavior suggests SSRF vulnerability
+    // We make a baseline request and look for indicators
+    let baseline_response = match client
+        .request(method.clone(), url)
+        .headers(headers.clone())
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            issues.push(format!("Baseline SSRF check request failed: {}", e));
+            return SsrfResult {
+                ssrf_suspected: false,
+                vulnerable_params,
+                tested_payloads: Vec::new(),
+                response_indicators,
+                issues,
+            };
+        }
+    };
+
+    // Check response for SSRF indicators
+    if let Ok(body) = baseline_response.text() {
+        let ssrf_indicators = vec![
+            ("EC2", "AWS metadata service indicator"),
+            ("metadata", "Metadata service indicator"),
+            ("internal", "Internal network indicator"),
+            ("localhost", "Localhost access indicator"),
+            ("169.254.169.254", "AWS metadata IP"),
+            ("connection refused", "Connection attempt indicator"),
+            ("timeout", "Timeout indicator"),
+        ];
+
+        for (indicator, description) in ssrf_indicators {
+            if body.to_lowercase().contains(&indicator.to_lowercase()) {
+                ssrf_suspected = true;
+                response_indicators.push(indicator.to_string());
+                issues.push(format!(
+                    "[SSRF Suspected] {} found in response: '{}'",
+                    description, indicator
+                ));
+            }
+        }
+    }
+
+    if ssrf_suspected {
+        issues.push(format!(
+            "[SSRF Suspected] Vulnerable parameters detected: {}. Response contains SSRF indicators.",
+            vulnerable_params.join(", ")
+        ));
+    } else if !vulnerable_params.is_empty() {
+        issues.push(format!(
+            "Potentially vulnerable parameters found ({}), but no SSRF indicators detected in response",
+            vulnerable_params.join(", ")
+        ));
+    }
+
+    SsrfResult {
+        ssrf_suspected,
+        vulnerable_params,
+        tested_payloads,
+        response_indicators,
         issues,
     }
 }

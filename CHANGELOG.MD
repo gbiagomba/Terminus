@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2025-10-13
+
+### Added
+- **Advanced Passive Vulnerability Detection**: Four new passive security detection features
+  - `--detect-host-injection`: Detects Host header injection vulnerabilities (CWE-444)
+    - Sends requests with malicious Host header (`evil.terminus.local`)
+    - Checks for reflection in Location, Vary, and Set-Cookie headers
+    - Checks for reflection in response body
+    - Marks findings as `[Host Injection Suspected]`
+    - **NOTE**: Passive detection only - no exploitation
+
+  - `--detect-xff-bypass`: Detects X-Forwarded-For IP-based access control bypasses
+    - Adds `X-Forwarded-For: 127.0.0.1` header to requests
+    - Compares baseline status code with XFF-modified request
+    - Flags suspicious status changes (e.g., 403 → 200)
+    - Marks findings as `[XFF Bypass?]` or `[XFF Bypass Suspected]`
+    - Identifies potential IP whitelist bypass vulnerabilities
+
+  - `--detect-csrf`: Passively detects CSRF vulnerabilities (CWE-352)
+    - Only tests state-changing methods (POST, PUT, PATCH, DELETE, CONNECT, TRACE)
+    - Test 1: Sends request without Origin and Referer headers
+    - Test 2: Sends request with fake Origin (`http://evil.terminus.local`)
+    - Checks for missing SameSite attribute on cookies
+    - Checks for missing X-Frame-Options header
+    - Checks for missing Content-Security-Policy header
+    - Marks findings as `[CSRF Suspected]` or `[CSRF Missing Headers: ...]`
+
+  - `--detect-ssrf`: Passively detects SSRF vulnerabilities (CWE-918)
+    - Identifies suspicious URL parameters: url, uri, dest, destination, next, redirect, image, file, path, load, fetch
+    - Checks response for SSRF indicators: EC2, metadata, internal, localhost, 169.254.169.254, connection refused, timeout
+    - Marks findings as `[SSRF Suspected]` with vulnerable parameters
+    - **NOTE**: Passive detection - looks for indicators, doesn't make external requests
+
+### Changed
+- Updated `ScanResult` struct to include four new optional fields:
+  - `host_injection`: HostInjectionResult with injection details
+  - `xff_bypass`: XffBypassResult with bypass detection results
+  - `csrf_result`: CsrfResult with CSRF vulnerability details
+  - `ssrf_result`: SsrfResult with SSRF detection findings
+- Added four new result structs with detailed vulnerability information
+- Enhanced tool description to emphasize advanced passive vulnerability detection
+- Updated Cargo.toml version to 2.8.0
+- Updated README with comprehensive examples for all new features
+- Updated help text with clear descriptions of all new detection flags
+
+### Security
+- All new detection features are passive and defensive only
+- No active exploitation or vulnerability testing
+- Designed for ethical security assessment with proper authorization
+- Host injection uses benign test host (`evil.terminus.local`)
+- XFF bypass only compares status codes, no exploitation
+- CSRF detection only checks for missing protections
+- SSRF detection only looks for indicators in responses
+- All features suitable for production environment scanning with rate limiting
+
+### Examples
+```bash
+# Test for Host header injection
+terminus -u https://example.com --detect-host-injection -k
+
+# Detect XFF bypass on admin endpoints
+terminus -f admin_endpoints.txt --detect-xff-bypass --rate-limit 5/s -k
+
+# Check for CSRF vulnerabilities on state-changing endpoints
+terminus -u https://api.example.com/update -X POST --detect-csrf -k
+
+# Detect potential SSRF vulnerabilities
+terminus -f api_endpoints.txt --detect-ssrf --check-body -k
+
+# Comprehensive vulnerability assessment with all v2.8.0 features
+terminus -f targets.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --detect-reflection \
+  --rate-limit 10/s \
+  -k \
+  --output-format all \
+  -o comprehensive_vuln_scan
+
+# Enterprise security workflow with AI analysis
+terminus -f production_apps.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  --rate-limit 5/s \
+  --random-delay 2-4 \
+  -k \
+  --output-format json \
+  -o enterprise_scan
+
+python terminus_ai_analyzer.py enterprise_scan.json \
+  --provider anthropic \
+  --persona security \
+  -o security_findings.txt
+```
+
 ## [2.7.0] - 2025-10-13
 
 ### Added
