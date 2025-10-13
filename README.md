@@ -5,6 +5,35 @@
 
 `terminus` is a command-line tool designed to test the accessibility of URLs without authentication, using various HTTP methods. It's particularly useful for identifying unprotected paths to web servers that require authentication, helping to expose potential security vulnerabilities. The tool supports individual URLs or lists from files, custom HTTP methods, multiple ports, and concurrent execution.
 
+## Table of Contents
+
+- [Features](#features)
+  - [Input Sources](#input-sources)
+  - [Output Options](#output-options)
+  - [HTTP Testing](#http-testing)
+  - [Advanced Features](#advanced-features)
+  - [Smart Analysis Features](#smart-analysis-features-v250)
+  - [Passive Security Analysis](#passive-security-analysis-v260)
+  - [HTTP/2 Desync Detection](#http2-desync-detection-v270)
+  - [Advanced Passive Vulnerability Detection](#advanced-passive-vulnerability-detection-v280)
+- [Installation](#installation)
+  - [Using the Makefile](#using-the-makefile)
+- [Usage](#usage)
+  - [Examples](#examples)
+    - [Basic Usage](#basic-usage)
+    - [Input Format Examples](#input-format-examples)
+    - [Piping Examples](#piping-examples)
+    - [Output Format Examples](#output-format-examples)
+    - [Advanced Examples](#advanced-examples)
+    - [Smart Analysis Examples](#smart-analysis-examples-v250)
+    - [Passive Security Analysis Examples](#passive-security-analysis-examples-v260)
+    - [HTTP/2 Desync Detection Examples](#http2-desync-detection-examples-v270)
+    - [Advanced Passive Vulnerability Detection Examples](#advanced-passive-vulnerability-detection-examples-v280)
+- [AI-Powered Analysis](#ai-powered-analysis)
+- [HTTP Methods Tested](#http-methods-tested)
+- [Contributing](#contributing)
+- [License](#license)
+
 ---
 
 ## Features
@@ -59,6 +88,12 @@
 - **CDN/Proxy Analysis**: Test for misconfiguration in CDN and reverse proxy HTTP/2 downgrade handling
 - **Status Code Comparison**: Detect discrepancies in status codes between HTTP versions
 - **Response Body Analysis**: Compare response body lengths and content for HTTP version differences
+
+### Advanced Passive Vulnerability Detection (v2.8.0)
+- **Host Header Injection Detection**: Passively detect Host header injection vulnerabilities (CWE-444) by checking if malicious host values are reflected in Location, Vary, or Set-Cookie headers
+- **X-Forwarded-For Bypass Detection**: Detect IP-based access control bypasses by comparing baseline requests with X-Forwarded-For header modifications
+- **CSRF Vulnerability Detection**: Passively identify missing CSRF protections including Origin/Referer validation, SameSite cookies, X-Frame-Options, and CSP headers
+- **SSRF Vulnerability Detection**: Detect potential Server-Side Request Forgery (CWE-918) vulnerabilities by identifying suspicious URL parameters and response indicators
 
 ---
 
@@ -156,6 +191,11 @@ Options:
       --check-security-headers     Analyze security headers (CSP, HSTS, X-Frame-Options, etc.)
       --detect-errors              Detect verbose error messages (SQL, stack traces, etc.)
       --detect-reflection          Check if input is reflected in response (passive XSS detection)
+      --http2-desync-check         Test HTTP/2 to HTTP/1.1 downgrade handling (detects potential request smuggling)
+      --detect-host-injection      Passively detect Host header injection vulnerabilities by checking response headers
+      --detect-xff-bypass          Detect X-Forwarded-For bypass by comparing baseline and XFF requests
+      --detect-csrf                Passively detect potential CSRF vulnerabilities and missing protections
+      --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -398,7 +438,7 @@ terminus -f target_list.txt \
   -o security_assessment
 
 # Then analyze with AI for insights
-python terminus_ai_analyzer.py security_assessment.json \
+python athena.py security_assessment.json \
   --provider ollama \
   --persona security \
   -o security_report.txt
@@ -519,10 +559,186 @@ terminus --http2-desync-check \
   -o desync_findings
 
 # Analyze findings with AI
-python terminus_ai_analyzer.py desync_findings.json \
+python athena.py desync_findings.json \
   --provider ollama \
   --persona security \
   -o desync_analysis.txt
+```
+
+#### Advanced Passive Vulnerability Detection Examples (v2.8.0)
+
+**Test for Host Header Injection**:
+```bash
+# Basic Host header injection detection
+terminus -u https://example.com --detect-host-injection -k
+
+# Test multiple endpoints for host injection
+terminus -f endpoints.txt --detect-host-injection --output-format json -o host_injection_scan
+
+# Combine with verbose output to see response headers
+terminus -u https://target.com/api \
+  --detect-host-injection \
+  -v \
+  -k \
+  --output-format json \
+  -o host_injection_detailed
+```
+
+**Detect X-Forwarded-For Bypasses**:
+```bash
+# Check for XFF bypass on protected endpoints
+terminus -u https://admin.example.com --detect-xff-bypass -k
+
+# Test multiple protected paths
+terminus -f admin_endpoints.txt \
+  --detect-xff-bypass \
+  --rate-limit 5/s \
+  --output-format json \
+  -o xff_bypass_scan
+
+# Test with different HTTP methods
+terminus -u https://api.target.com/admin \
+  -X ALL \
+  --detect-xff-bypass \
+  -k \
+  --output-format json \
+  -o xff_method_scan
+```
+
+**Detect CSRF Vulnerabilities**:
+```bash
+# Test for CSRF on state-changing endpoints
+terminus -u https://example.com/api/update -X POST --detect-csrf -k
+
+# Scan multiple POST/PUT/DELETE endpoints
+terminus -f state_changing_endpoints.txt \
+  -X POST \
+  --detect-csrf \
+  --output-format json \
+  -o csrf_scan
+
+# Comprehensive CSRF testing with all methods
+terminus -f api_endpoints.txt \
+  -X ALL \
+  --detect-csrf \
+  --rate-limit 10/s \
+  -k \
+  --output-format all \
+  -o csrf_comprehensive_scan
+```
+
+**Detect SSRF Vulnerabilities**:
+```bash
+# Test endpoints with URL parameters for SSRF
+terminus -u "https://example.com/proxy?url=http://internal" --detect-ssrf -k
+
+# Scan endpoints that might be vulnerable to SSRF
+terminus -f urls_with_params.txt \
+  --detect-ssrf \
+  --output-format json \
+  -o ssrf_scan
+
+# Test API endpoints for SSRF indicators
+terminus -f api_endpoints.txt \
+  --detect-ssrf \
+  --check-body \
+  --rate-limit 5/s \
+  -k \
+  --output-format json \
+  -o ssrf_detailed_scan
+```
+
+**Comprehensive Vulnerability Assessment**:
+```bash
+# Full passive vulnerability scan with all v2.8.0 features
+terminus -f target_list.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --detect-reflection \
+  --rate-limit 10/s \
+  -k \
+  --output-format all \
+  -o comprehensive_vuln_scan
+
+# Then analyze with AI
+python athena.py comprehensive_vuln_scan.json \
+  --provider ollama \
+  --persona security \
+  -o vulnerability_analysis.txt
+```
+
+**Enterprise Security Testing Workflow**:
+```bash
+# Stage 1: Reconnaissance with all detection features
+terminus -f production_apps.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  --http2-desync-check \
+  --check-security-headers \
+  --detect-errors \
+  --check-body \
+  --extract-links \
+  --rate-limit 5/s \
+  --random-delay 2-4 \
+  -k \
+  --output-format json \
+  -o enterprise_scan_stage1
+
+# Stage 2: Deep analysis of findings
+python athena.py enterprise_scan_stage1.json \
+  --provider anthropic \
+  --persona security \
+  -o security_findings.txt
+
+# Stage 3: Compare with previous scan
+terminus -f production_apps.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  --diff enterprise_scan_stage1.json \
+  -k \
+  -o enterprise_scan_stage2
+```
+
+**Targeted Testing Examples**:
+```bash
+# Test only for bypass techniques (XFF and Host Injection)
+terminus -f protected_endpoints.txt \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  -k \
+  --output-format json \
+  -o bypass_techniques_scan
+
+# Test only for injection vulnerabilities (CSRF and SSRF)
+terminus -f api_endpoints.txt \
+  -X POST \
+  --detect-csrf \
+  --detect-ssrf \
+  --rate-limit 10/s \
+  -k \
+  --output-format json \
+  -o injection_vulns_scan
+
+# Proxy through Burp for manual review
+terminus -u https://target.com/vulnerable/endpoint \
+  --detect-host-injection \
+  --detect-xff-bypass \
+  --detect-csrf \
+  --detect-ssrf \
+  -x http://127.0.0.1:8080 \
+  -k \
+  -v \
+  --output-format json \
+  -o burp_manual_review
 ```
 
 ## AI-Powered Analysis
@@ -546,29 +762,29 @@ pip install -r requirements.txt
 
 **Analyze with Ollama (local)**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json --provider ollama --persona security
+python athena.py scan_results.json --provider ollama --persona security
 ```
 
 **Analyze with specific model**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json --provider ollama --model llama3 --persona developer
+python athena.py scan_results.json --provider ollama --model llama3 --persona developer
 ```
 
 **Analyze with OpenAI**:
 ```bash
 export OPENAI_API_KEY=sk-...
-python terminus_ai_analyzer.py scan_results.json --provider openai --persona tpm
+python athena.py scan_results.json --provider openai --persona tpm
 ```
 
 **Analyze with Anthropic Claude**:
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-python terminus_ai_analyzer.py scan_results.json --provider anthropic --persona security
+python athena.py scan_results.json --provider anthropic --persona security
 ```
 
 **Save analysis to file**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json \
+python athena.py scan_results.json \
   --provider ollama \
   --persona security \
   --output analysis_report.txt
@@ -576,7 +792,7 @@ python terminus_ai_analyzer.py scan_results.json \
 
 **Custom local AI server**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json \
+python athena.py scan_results.json \
   --provider lmstudio \
   --base-url http://localhost:1234 \
   --persona developer
