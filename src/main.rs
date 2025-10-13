@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use atty::Stream;
 use clap::{Arg, ArgAction, Command};
+use std::io::IsTerminal;
 use regex::Regex;
 use reqwest::blocking::ClientBuilder;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -303,7 +303,7 @@ fn main() -> Result<()> {
         vec![url.to_string()]
     } else if let Some(file) = matches.get_one::<String>("file") {
         parse_input_file(file, ipv6_enabled)?
-    } else if !atty::is(Stream::Stdin) {
+    } else if !io::stdin().is_terminal() {
         // Read from stdin (pipe support)
         read_stdin(ipv6_enabled)?
     } else {

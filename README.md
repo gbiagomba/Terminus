@@ -438,7 +438,7 @@ terminus -f target_list.txt \
   -o security_assessment
 
 # Then analyze with AI for insights
-python terminus_ai_analyzer.py security_assessment.json \
+python athena.py security_assessment.json \
   --provider ollama \
   --persona security \
   -o security_report.txt
@@ -559,7 +559,7 @@ terminus --http2-desync-check \
   -o desync_findings
 
 # Analyze findings with AI
-python terminus_ai_analyzer.py desync_findings.json \
+python athena.py desync_findings.json \
   --provider ollama \
   --persona security \
   -o desync_analysis.txt
@@ -666,7 +666,7 @@ terminus -f target_list.txt \
   -o comprehensive_vuln_scan
 
 # Then analyze with AI
-python terminus_ai_analyzer.py comprehensive_vuln_scan.json \
+python athena.py comprehensive_vuln_scan.json \
   --provider ollama \
   --persona security \
   -o vulnerability_analysis.txt
@@ -692,7 +692,7 @@ terminus -f production_apps.txt \
   -o enterprise_scan_stage1
 
 # Stage 2: Deep analysis of findings
-python terminus_ai_analyzer.py enterprise_scan_stage1.json \
+python athena.py enterprise_scan_stage1.json \
   --provider anthropic \
   --persona security \
   -o security_findings.txt
@@ -762,29 +762,29 @@ pip install -r requirements.txt
 
 **Analyze with Ollama (local)**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json --provider ollama --persona security
+python athena.py scan_results.json --provider ollama --persona security
 ```
 
 **Analyze with specific model**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json --provider ollama --model llama3 --persona developer
+python athena.py scan_results.json --provider ollama --model llama3 --persona developer
 ```
 
 **Analyze with OpenAI**:
 ```bash
 export OPENAI_API_KEY=sk-...
-python terminus_ai_analyzer.py scan_results.json --provider openai --persona tpm
+python athena.py scan_results.json --provider openai --persona tpm
 ```
 
 **Analyze with Anthropic Claude**:
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-python terminus_ai_analyzer.py scan_results.json --provider anthropic --persona security
+python athena.py scan_results.json --provider anthropic --persona security
 ```
 
 **Save analysis to file**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json \
+python athena.py scan_results.json \
   --provider ollama \
   --persona security \
   --output analysis_report.txt
@@ -792,7 +792,7 @@ python terminus_ai_analyzer.py scan_results.json \
 
 **Custom local AI server**:
 ```bash
-python terminus_ai_analyzer.py scan_results.json \
+python athena.py scan_results.json \
   --provider lmstudio \
   --base-url http://localhost:1234 \
   --persona developer
