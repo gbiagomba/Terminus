@@ -211,21 +211,39 @@ fn main() -> Result<()> {
         .arg(Arg::new("detect-xff-bypass").long("detect-xff-bypass").help("Detect X-Forwarded-For bypass by comparing baseline and XFF requests").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
+        .arg(Arg::new("scan-level").long("scan-level").value_name("LEVEL").help("Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)"))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
     let allow_insecure = matches.get_flag("insecure");
     let follow_redirects = matches.get_flag("follow");
-    let check_body = matches.get_flag("check-body");
-    let extract_links = matches.get_flag("extract-links");
-    let check_security_headers = matches.get_flag("check-security-headers");
-    let detect_errors = matches.get_flag("detect-errors");
-    let detect_reflection = matches.get_flag("detect-reflection");
-    let http2_desync_check = matches.get_flag("http2-desync-check");
-    let detect_host_injection = matches.get_flag("detect-host-injection");
-    let detect_xff_bypass = matches.get_flag("detect-xff-bypass");
-    let detect_csrf = matches.get_flag("detect-csrf");
-    let detect_ssrf = matches.get_flag("detect-ssrf");
+
+    // Process scan level presets
+    let scan_level = matches.get_one::<String>("scan-level").map(|s| s.as_str());
+
+    // Apply preset defaults, but allow individual flags to override
+    let preset_check_body = matches!(scan_level, Some("full"));
+    let preset_extract_links = matches!(scan_level, Some("full"));
+    let preset_check_security_headers = matches!(scan_level, Some("standard") | Some("full") | Some("vuln"));
+    let preset_detect_errors = matches!(scan_level, Some("standard") | Some("full") | Some("vuln"));
+    let preset_detect_reflection = matches!(scan_level, Some("standard") | Some("full") | Some("vuln"));
+    let preset_http2_desync_check = matches!(scan_level, Some("full") | Some("vuln"));
+    let preset_detect_host_injection = matches!(scan_level, Some("full") | Some("vuln"));
+    let preset_detect_xff_bypass = matches!(scan_level, Some("full") | Some("vuln"));
+    let preset_detect_csrf = matches!(scan_level, Some("full") | Some("vuln"));
+    let preset_detect_ssrf = matches!(scan_level, Some("full") | Some("vuln"));
+
+    // Individual flags override presets
+    let check_body = matches.get_flag("check-body") || preset_check_body;
+    let extract_links = matches.get_flag("extract-links") || preset_extract_links;
+    let check_security_headers = matches.get_flag("check-security-headers") || preset_check_security_headers;
+    let detect_errors = matches.get_flag("detect-errors") || preset_detect_errors;
+    let detect_reflection = matches.get_flag("detect-reflection") || preset_detect_reflection;
+    let http2_desync_check = matches.get_flag("http2-desync-check") || preset_http2_desync_check;
+    let detect_host_injection = matches.get_flag("detect-host-injection") || preset_detect_host_injection;
+    let detect_xff_bypass = matches.get_flag("detect-xff-bypass") || preset_detect_xff_bypass;
+    let detect_csrf = matches.get_flag("detect-csrf") || preset_detect_csrf;
+    let detect_ssrf = matches.get_flag("detect-ssrf") || preset_detect_ssrf;
 
     // Parse rate limiting
     let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
@@ -419,7 +437,14 @@ fn main() -> Result<()> {
                     std::thread::sleep(std::time::Duration::from_secs(delay));
                 }
 
-                let full_url = format!("{}:{}", url, port);
+                // Only append port if URL doesn't already have one
+                let full_url = if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
+                    // URL already has a port, use it as-is
+                    url.clone()
+                } else {
+                    // No port in URL, append it
+                    format!("{}:{}", url, port)
+                };
                 match client.request(req_method.clone(), &full_url)
                     .headers(custom_headers.clone())
                     .send() {

@@ -68,6 +68,11 @@
 - **TLS/SSL Options**: Allow insecure connections with `-k` flag
 - **Redirect Handling**: Follow redirects with `-L` flag
 - **Verbose Output**: View detailed response headers with `-v` flag
+- **Scan Level Presets**: Predefined security scan configurations with `--scan-level` flag:
+  - `quick`: Basic HTTP requests only (default behavior)
+  - `standard`: Security headers, error detection, and reflection checks
+  - `full`: All features including body analysis and link extraction
+  - `vuln`: All vulnerability detection features (HTTP/2 desync, Host injection, XFF bypass, CSRF, SSRF)
 
 ### Smart Analysis Features (v2.5.0)
 - **Smart Diffing**: Compare two scans and identify new/removed endpoints and status changes
@@ -196,6 +201,7 @@ Options:
       --detect-xff-bypass          Detect X-Forwarded-For bypass by comparing baseline and XFF requests
       --detect-csrf                Passively detect potential CSRF vulnerabilities and missing protections
       --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
+      --scan-level <LEVEL>         Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -322,6 +328,27 @@ terminus -u https://api.example.com -X POST \
   --http-version 2 \
   --output-format all \
   -o pentest_results
+```
+
+**Scan Level Preset Examples**:
+```bash
+# Quick scan - basic requests only (fastest)
+terminus -f urls.txt --scan-level quick
+
+# Standard scan - security headers, errors, and reflection detection
+terminus -f production_urls.txt --scan-level standard -o standard_scan
+
+# Full scan - all features including body analysis
+terminus -f targets.txt --scan-level full --rate-limit 10/s -o full_scan
+
+# Vulnerability scan - all passive vulnerability detection
+terminus -f api_endpoints.txt --scan-level vuln -k -o vuln_scan
+
+# Override preset with individual flags
+terminus -f urls.txt --scan-level standard --detect-host-injection -o custom_scan
+
+# Combine preset with other flags
+terminus -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
 ```
 
 #### Smart Analysis Examples (v2.5.0)
