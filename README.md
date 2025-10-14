@@ -63,7 +63,11 @@
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
-- **Multiple Ports**: Specify comma-separated ports like `80,443` with `-p` flag
+- **Smart Port Scanning**:
+  - Default: Scans ports 80 and 443 when no `-p` flag is specified
+  - Custom Ports: Specify comma-separated ports like `80,443,8080` with `-p` flag
+  - File-based: Automatically uses ports from nmap/testssl/nuclei scan outputs
+  - URL-embedded: Respects ports already specified in URLs (e.g., `http://example.com:8080`)
 - **HTTP Version Control**: Force HTTP/1.0, 1.1, or 2.0 using `--http-version`
 - **Status Code Filtering**: Filter responses by status code using `-F`
 
@@ -219,12 +223,12 @@ Options:
 
 #### Basic Usage
 
-**Test a single URL**:
+**Test a single URL (scans both port 80 and 443 by default)**:
 ```bash
 terminus -u http://example.com
 ```
 
-**Test an IPv4 address**:
+**Test an IPv4 address (scans ports 80 and 443)**:
 ```bash
 terminus -u 192.168.1.1
 ```
@@ -234,36 +238,48 @@ terminus -u 192.168.1.1
 terminus -u "2001:db8::1" -6
 ```
 
+**Test with custom ports**:
+```bash
+terminus -u http://example.com -p 8080,8443
+```
+
 **Test multiple URLs from a file**:
 ```bash
-terminus -f urls.txt -p 80,443 -X ALL
+terminus -f urls.txt -X ALL
+```
+
+**Test specific ports only**:
+```bash
+terminus -f urls.txt -p 80,443,8080 -X ALL
 ```
 
 #### Input Format Examples
 
-**Parse nmap XML output**:
+**Parse nmap XML output (uses ports from nmap scan)**:
 ```bash
-nmap -p80,443 -oX scan.xml target.com
+nmap -p80,443,8080 -oX scan.xml target.com
 terminus -f scan.xml
 ```
 
-**Parse nmap greppable output**:
+**Parse nmap greppable output (uses ports from nmap scan)**:
 ```bash
 nmap -p80,443 -oG scan.gnmap target.com
 terminus -f scan.gnmap
 ```
 
-**Parse testssl.sh JSON output**:
+**Parse testssl.sh JSON output (uses ports from testssl scan)**:
 ```bash
 testssl --json-pretty target.com > testssl.json
 terminus -f testssl.json
 ```
 
-**Parse ProjectDiscovery tool output**:
+**Parse ProjectDiscovery tool output (uses discovered URLs with ports)**:
 ```bash
 echo "target.com" | katana -json -o katana.json
 terminus -f katana.json
 ```
+
+**Note**: When using file inputs, Terminus automatically uses the ports specified in the scan output. No `-p` flag needed!
 
 #### Piping Examples
 

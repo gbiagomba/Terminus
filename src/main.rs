@@ -436,8 +436,19 @@ fn main() -> Result<()> {
     // Build scan tasks
     let mut scan_tasks = Vec::new();
     for url in &urls {
-        let default_port = if url.starts_with("https") { 443 } else { 80 };
-        let test_ports = if ports.is_empty() { vec![default_port] } else { ports.clone() };
+        // Check if URL already has a port specified
+        let has_port = url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':'));
+
+        let test_ports = if has_port {
+            // URL already has a port (from nmap/testssl/nuclei), use a dummy port since we won't append it
+            vec![0]
+        } else if !ports.is_empty() {
+            // User specified ports via -p flag
+            ports.clone()
+        } else {
+            // No ports specified and URL has no port - scan both 80 and 443 by default
+            vec![80, 443]
+        };
 
         for method in &methods {
             for port in &test_ports {
