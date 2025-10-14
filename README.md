@@ -53,7 +53,13 @@
 - **Multiple Output Formats**: stdout, txt, json, html, csv, or all formats simultaneously
 - **Output Format Control**: Use `--output-format` to specify desired format(s)
 - **Custom Output Location**: Specify output file base name with `-o` flag
-- **CSV Export**: Generate CSV files for easy data analysis and import into spreadsheets
+- **Vulnerability Indicators**: All output formats (stdout, txt, csv, html) display detected vulnerabilities with clear indicators
+- **Enhanced HTML Reports**: Interactive HTML reports with:
+  - Vulnerability summary dashboard with statistics
+  - JavaScript-powered filtering by vulnerability type
+  - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Security Issues, Error Messages)
+  - Clean/Pass indicators for endpoints with no vulnerabilities
+- **CSV Export**: Generate CSV files with vulnerability columns for easy data analysis and import into spreadsheets
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
@@ -62,6 +68,7 @@
 - **Status Code Filtering**: Filter responses by status code using `-F`
 
 ### Advanced Features
+- **Concurrent Scanning**: Multi-threaded scanning with configurable thread count using `-t/--threads` flag (default: 10 threads)
 - **Proxy Support**: Route traffic through proxy tools like Burp Suite using `-x` flag
 - **Custom Headers**: Add headers via `-H` flag (multiple allowed) or `--header-file`
 - **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
@@ -202,6 +209,7 @@ Options:
       --detect-csrf                Passively detect potential CSRF vulnerabilities and missing protections
       --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
       --scan-level <LEVEL>         Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)
+  -t, --threads <NUM>              Number of concurrent threads for scanning (default: 10)
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -349,6 +357,29 @@ terminus -f urls.txt --scan-level standard --detect-host-injection -o custom_sca
 
 # Combine preset with other flags
 terminus -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
+```
+
+**Concurrent Scanning with Threading**:
+```bash
+# Fast scan with 20 concurrent threads
+terminus -f large_url_list.txt -t 20 -o fast_scan
+
+# Balanced scanning with 10 threads (default)
+terminus -f urls.txt --scan-level vuln -o balanced_scan
+
+# Conservative scanning with 5 threads for production
+terminus -f production_endpoints.txt -t 5 --rate-limit 10/s -o conservative_scan
+
+# Maximum speed scan with 50 threads
+terminus -f urls.txt -t 50 --output-format all -o speed_scan
+
+# Thread control with vulnerability detection
+terminus -f targets.txt \
+  -t 15 \
+  --scan-level vuln \
+  --rate-limit 20/s \
+  --output-format json \
+  -o threaded_vuln_scan
 ```
 
 #### Smart Analysis Examples (v2.5.0)

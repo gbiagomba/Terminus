@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Command};
 use std::io::IsTerminal;
 use regex::Regex;
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 use reqwest::blocking::ClientBuilder;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Method, StatusCode, Version};
@@ -212,11 +214,23 @@ fn main() -> Result<()> {
         .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
         .arg(Arg::new("scan-level").long("scan-level").value_name("LEVEL").help("Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)"))
+        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("10").help("Number of concurrent threads for scanning (default: 10)"))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
     let allow_insecure = matches.get_flag("insecure");
     let follow_redirects = matches.get_flag("follow");
+
+    // Parse thread count
+    let thread_count: usize = matches.get_one::<String>("threads")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+
+    // Configure Rayon thread pool
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .build_global()
+        .context("Failed to initialize thread pool")?;
 
     // Process scan level presets
     let scan_level = matches.get_one::<String>("scan-level").map(|s| s.as_str());
@@ -246,7 +260,7 @@ fn main() -> Result<()> {
     let detect_ssrf = matches.get_flag("detect-ssrf") || preset_detect_ssrf;
 
     // Parse rate limiting
-    let mut rate_limiter = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
+    let rate_limiter_option = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
         Some(RateLimiter::new(rate_str)?)
     } else {
         None
@@ -352,7 +366,9 @@ fn main() -> Result<()> {
 
     let output_base = matches.get_one::<String>("output").map(|s| s.as_str());
 
-    let mut results: Vec<ScanResult> = Vec::new();
+    // Use Arc/Mutex for thread-safe rate limiter and results collection
+    let rate_limiter = Arc::new(Mutex::new(rate_limiter_option));
+    let results = Arc::new(Mutex::new(Vec::new()));
 
     // Parse headers from command line and file
     let mut custom_headers = HeaderMap::new();
@@ -417,42 +433,54 @@ fn main() -> Result<()> {
         }
     }
 
-    // Scan URLs
+    // Build scan tasks
+    let mut scan_tasks = Vec::new();
     for url in &urls {
         let default_port = if url.starts_with("https") { 443 } else { 80 };
         let test_ports = if ports.is_empty() { vec![default_port] } else { ports.clone() };
 
         for method in &methods {
-            let req_method = Method::from_str(method).unwrap_or(Method::GET);
             for port in &test_ports {
-                // Apply rate limiting if configured
-                if let Some(ref mut limiter) = rate_limiter {
-                    limiter.wait();
-                }
+                scan_tasks.push((url.clone(), method.clone(), *port));
+            }
+        }
+    }
 
-                // Apply random delay if configured
-                if let Some((min, max)) = random_delay_range {
-                    use rand::Rng;
-                    let delay = rand::rng().random_range(min..=max);
-                    std::thread::sleep(std::time::Duration::from_secs(delay));
-                }
+    // Scan URLs in parallel
+    scan_tasks.par_iter().for_each(|(url, method, port)| {
+        let req_method = Method::from_str(method).unwrap_or(Method::GET);
 
-                // Only append port if URL doesn't already have one
-                let full_url = if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
-                    // URL already has a port, use it as-is
-                    url.clone()
-                } else {
-                    // No port in URL, append it
-                    format!("{}:{}", url, port)
-                };
-                match client.request(req_method.clone(), &full_url)
+        // Apply rate limiting if configured
+        if let Ok(mut limiter_guard) = rate_limiter.lock() {
+            if let Some(ref mut limiter) = *limiter_guard {
+                limiter.wait();
+            }
+        }
+
+        // Apply random delay if configured
+        if let Some((min, max)) = random_delay_range {
+            use rand::Rng;
+            let delay = rand::rng().random_range(min..=max);
+            std::thread::sleep(std::time::Duration::from_secs(delay));
+        }
+
+        // Only append port if URL doesn't already have one
+        let full_url = if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
+            // URL already has a port, use it as-is
+            url.clone()
+        } else {
+            // No port in URL, append it
+            format!("{}:{}", url, port)
+        };
+
+        match client.request(req_method.clone(), &full_url)
                     .headers(custom_headers.clone())
                     .send() {
                     Ok(resp) => {
                         let status = resp.status();
                         if let Some(filter) = filter_code {
                             if status != filter {
-                                continue;
+                                return;
                             }
                         }
 
@@ -584,62 +612,67 @@ fn main() -> Result<()> {
                         };
 
                         if should_add {
-                            results.push(ScanResult {
-                                url: url.clone(),
-                                method: method.clone(),
-                                status: status.as_u16(),
-                                port: *port,
-                                headers: headers_str,
-                                error: None,
-                                body_preview,
-                                matched_patterns,
-                                extracted_links,
-                                security_headers,
-                                detected_errors,
-                                reflection_detected,
-                                http2_desync,
-                                host_injection,
-                                xff_bypass,
-                                csrf_result,
-                                ssrf_result,
-                            });
+                            if let Ok(mut results_guard) = results.lock() {
+                                results_guard.push(ScanResult {
+                                    url: url.clone(),
+                                    method: method.clone(),
+                                    status: status.as_u16(),
+                                    port: *port,
+                                    headers: headers_str,
+                                    error: None,
+                                    body_preview,
+                                    matched_patterns,
+                                    extracted_links,
+                                    security_headers,
+                                    detected_errors,
+                                    reflection_detected,
+                                    http2_desync,
+                                    host_injection,
+                                    xff_bypass,
+                                    csrf_result,
+                                    ssrf_result,
+                                });
+                            }
                         }
                     }
                     Err(e) => {
-                        results.push(ScanResult {
-                            url: url.clone(),
-                            method: method.clone(),
-                            status: 0,
-                            port: *port,
-                            headers: None,
-                            error: Some(e.to_string()),
-                            body_preview: None,
-                            matched_patterns: None,
-                            extracted_links: None,
-                            security_headers: None,
-                            detected_errors: None,
-                            reflection_detected: None,
-                            http2_desync: None,
-                            host_injection: None,
-                            xff_bypass: None,
-                            csrf_result: None,
-                            ssrf_result: None,
-                        });
+                        if let Ok(mut results_guard) = results.lock() {
+                            results_guard.push(ScanResult {
+                                url: url.clone(),
+                                method: method.clone(),
+                                status: 0,
+                                port: *port,
+                                headers: None,
+                                error: Some(e.to_string()),
+                                body_preview: None,
+                                matched_patterns: None,
+                                extracted_links: None,
+                                security_headers: None,
+                                detected_errors: None,
+                                reflection_detected: None,
+                                http2_desync: None,
+                                host_injection: None,
+                                xff_bypass: None,
+                                csrf_result: None,
+                                ssrf_result: None,
+                            });
+                        }
                     }
                 }
-            }
-        }
-    }
+    });
+
+    // Extract results from Arc<Mutex>
+    let final_results = results.lock().unwrap().clone();
 
     // Handle diff mode if requested
     if let Some(diff_file) = matches.get_one::<String>("diff") {
         let old_results = load_previous_scan(diff_file)?;
-        let diff = compute_diff(&old_results, &results);
+        let diff = compute_diff(&old_results, &final_results);
         display_diff(&diff);
     }
 
     // Output results in the specified format(s)
-    output_results(&results, output_format, output_base, verbose)?;
+    output_results(&final_results, output_format, output_base, verbose)?;
 
     Ok(())
 }
@@ -908,22 +941,89 @@ fn output_results(results: &[ScanResult], format: OutputFormat, output_base: Opt
     Ok(())
 }
 
+fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
+    let mut indicators = Vec::new();
+
+    // HTTP/2 Desync
+    if let Some(ref desync) = result.http2_desync {
+        if desync.desync_detected {
+            indicators.push("[HTTP/2 Desync Detected]".to_string());
+        }
+    }
+
+    // Host Injection
+    if let Some(ref host_inj) = result.host_injection {
+        if host_inj.injection_suspected {
+            indicators.push("[Host Injection Suspected]".to_string());
+        }
+    }
+
+    // XFF Bypass
+    if let Some(ref xff) = result.xff_bypass {
+        if xff.bypass_suspected {
+            indicators.push("[XFF Bypass Suspected]".to_string());
+        }
+    }
+
+    // CSRF
+    if let Some(ref csrf) = result.csrf_result {
+        if csrf.csrf_suspected {
+            indicators.push("[CSRF Suspected]".to_string());
+        }
+    }
+
+    // SSRF
+    if let Some(ref ssrf) = result.ssrf_result {
+        if ssrf.ssrf_suspected {
+            indicators.push("[SSRF Suspected]".to_string());
+        }
+    }
+
+    // Reflection
+    if let Some(true) = result.reflection_detected {
+        indicators.push("[Reflection Detected]".to_string());
+    }
+
+    // Security Headers Issues
+    if let Some(ref sec_headers) = result.security_headers {
+        if !sec_headers.issues.is_empty() {
+            indicators.push(format!("[Security Issues: {}]", sec_headers.issues.len()));
+        }
+    }
+
+    // Detected Errors
+    if let Some(ref errors) = result.detected_errors {
+        if !errors.is_empty() {
+            indicators.push(format!("[Error Messages: {}]", errors.len()));
+        }
+    }
+
+    indicators
+}
+
 fn output_stdout(results: &[ScanResult], verbose: bool) {
     for result in results {
         if let Some(error) = &result.error {
             eprintln!("Error on {}:{} using {}: {}", result.url, result.port, result.method, error);
         } else {
+            let vuln_indicators = collect_vuln_indicators(result);
+            let indicators_str = if !vuln_indicators.is_empty() {
+                format!(" {}", vuln_indicators.join(" "))
+            } else {
+                String::new()
+            };
+
             if verbose {
                 if let Some(headers) = &result.headers {
-                    println!("URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}",
-                        result.url, result.method, result.status, result.port, headers);
+                    println!("URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}{}",
+                        result.url, result.method, result.status, result.port, headers, indicators_str);
                 } else {
-                    println!("URL: {}, Method: {}, Status: {}, Port: {}",
-                        result.url, result.method, result.status, result.port);
+                    println!("URL: {}, Method: {}, Status: {}, Port: {}{}",
+                        result.url, result.method, result.status, result.port, indicators_str);
                 }
             } else {
-                println!("URL: {}, Method: {}, Status: {}, Port: {}",
-                    result.url, result.method, result.status, result.port);
+                println!("{} [{}:{}]{}",
+                    result.url, result.method, result.status, indicators_str);
             }
         }
     }
@@ -937,17 +1037,24 @@ fn output_txt(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         if let Some(error) = &result.error {
             writeln!(file, "Error on {}:{} using {}: {}", result.url, result.port, result.method, error)?;
         } else {
+            let vuln_indicators = collect_vuln_indicators(result);
+            let indicators_str = if !vuln_indicators.is_empty() {
+                format!(" {}", vuln_indicators.join(" "))
+            } else {
+                String::new()
+            };
+
             if verbose {
                 if let Some(headers) = &result.headers {
-                    writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}",
-                        result.url, result.method, result.status, result.port, headers)?;
+                    writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}{}",
+                        result.url, result.method, result.status, result.port, headers, indicators_str)?;
                 } else {
-                    writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}",
-                        result.url, result.method, result.status, result.port)?;
+                    writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}{}",
+                        result.url, result.method, result.status, result.port, indicators_str)?;
                 }
             } else {
-                writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}",
-                    result.url, result.method, result.status, result.port)?;
+                writeln!(file, "URL: {}, Method: {}, Status: {}, Port: {}{}",
+                    result.url, result.method, result.status, result.port, indicators_str)?;
             }
         }
     }
@@ -967,21 +1074,226 @@ fn output_json(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
 fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
     let filename = format!("{}.html", output_base.unwrap_or("terminus_results"));
 
-    let mut html = String::from("<!DOCTYPE html>\n<html>\n<head>\n<title>Terminus Scan Results</title>\n");
-    html.push_str("<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;width:100%;}");
-    html.push_str("th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#4CAF50;color:white;}");
-    html.push_str("tr:nth-child(even){background-color:#f2f2f2;}.error{color:red;}</style>\n</head>\n<body>\n");
-    html.push_str("<h1>Terminus Scan Results</h1>\n<table>\n");
-    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Headers</th><th>Error</th></tr>\n");
+    // Calculate vulnerability statistics
+    let total_results = results.len();
+    let mut vuln_counts = std::collections::HashMap::new();
+    vuln_counts.insert("http2_desync", 0);
+    vuln_counts.insert("host_injection", 0);
+    vuln_counts.insert("xff_bypass", 0);
+    vuln_counts.insert("csrf", 0);
+    vuln_counts.insert("ssrf", 0);
+    vuln_counts.insert("reflection", 0);
+    vuln_counts.insert("security_issues", 0);
+    vuln_counts.insert("error_messages", 0);
 
     for result in results {
-        html.push_str("<tr>");
-        html.push_str(&format!("<td>{}</td>", result.url));
-        html.push_str(&format!("<td>{}</td>", result.method));
+        if let Some(ref desync) = result.http2_desync {
+            if desync.desync_detected {
+                *vuln_counts.get_mut("http2_desync").unwrap() += 1;
+            }
+        }
+        if let Some(ref host_inj) = result.host_injection {
+            if host_inj.injection_suspected {
+                *vuln_counts.get_mut("host_injection").unwrap() += 1;
+            }
+        }
+        if let Some(ref xff) = result.xff_bypass {
+            if xff.bypass_suspected {
+                *vuln_counts.get_mut("xff_bypass").unwrap() += 1;
+            }
+        }
+        if let Some(ref csrf) = result.csrf_result {
+            if csrf.csrf_suspected {
+                *vuln_counts.get_mut("csrf").unwrap() += 1;
+            }
+        }
+        if let Some(ref ssrf) = result.ssrf_result {
+            if ssrf.ssrf_suspected {
+                *vuln_counts.get_mut("ssrf").unwrap() += 1;
+            }
+        }
+        if let Some(true) = result.reflection_detected {
+            *vuln_counts.get_mut("reflection").unwrap() += 1;
+        }
+        if let Some(ref sec_headers) = result.security_headers {
+            if !sec_headers.issues.is_empty() {
+                *vuln_counts.get_mut("security_issues").unwrap() += 1;
+            }
+        }
+        if let Some(ref errors) = result.detected_errors {
+            if !errors.is_empty() {
+                *vuln_counts.get_mut("error_messages").unwrap() += 1;
+            }
+        }
+    }
+
+    let mut html = String::from("<!DOCTYPE html>\n<html>\n<head>\n<meta charset='UTF-8'>\n<title>Terminus Scan Results</title>\n");
+
+    // Enhanced CSS styling
+    html.push_str("<style>\n");
+    html.push_str("body{font-family:Arial,sans-serif;margin:20px;background:#f5f5f5;}\n");
+    html.push_str("h1{color:#2c3e50;}\n");
+    html.push_str(".summary{background:#fff;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}\n");
+    html.push_str(".summary h2{margin-top:0;color:#2c3e50;}\n");
+    html.push_str(".stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:15px;}\n");
+    html.push_str(".stat-card{background:#f8f9fa;padding:15px;border-radius:6px;border-left:4px solid #4CAF50;}\n");
+    html.push_str(".stat-card.vuln{border-left-color:#e74c3c;}\n");
+    html.push_str(".stat-label{font-size:12px;color:#7f8c8d;text-transform:uppercase;}\n");
+    html.push_str(".stat-value{font-size:24px;font-weight:bold;color:#2c3e50;margin-top:5px;}\n");
+    html.push_str(".filters{background:#fff;padding:15px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}\n");
+    html.push_str(".filter-group{display:inline-block;margin-right:15px;margin-bottom:10px;}\n");
+    html.push_str(".filter-group label{margin-left:5px;}\n");
+    html.push_str("table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.1);}\n");
+    html.push_str("th,td{border:1px solid #ddd;padding:12px;text-align:left;}\n");
+    html.push_str("th{background-color:#4CAF50;color:white;position:sticky;top:0;}\n");
+    html.push_str("tr:nth-child(even){background-color:#f8f9fa;}\n");
+    html.push_str("tr:hover{background-color:#e8f5e9;}\n");
+    html.push_str(".error{color:#e74c3c;font-weight:bold;}\n");
+    html.push_str(".vuln-badge{display:inline-block;background:#e74c3c;color:white;padding:4px 8px;border-radius:4px;font-size:11px;margin:2px;}\n");
+    html.push_str(".vuln-badge.security{background:#f39c12;}\n");
+    html.push_str(".hidden{display:none;}\n");
+    html.push_str("</style>\n");
+
+    // JavaScript for filtering
+    html.push_str("<script>\n");
+    html.push_str("function filterTable() {\n");
+    html.push_str("  const filters = {\n");
+    html.push_str("    http2: document.getElementById('filter-http2').checked,\n");
+    html.push_str("    host: document.getElementById('filter-host').checked,\n");
+    html.push_str("    xff: document.getElementById('filter-xff').checked,\n");
+    html.push_str("    csrf: document.getElementById('filter-csrf').checked,\n");
+    html.push_str("    ssrf: document.getElementById('filter-ssrf').checked,\n");
+    html.push_str("    reflection: document.getElementById('filter-reflection').checked,\n");
+    html.push_str("    security: document.getElementById('filter-security').checked,\n");
+    html.push_str("    errors: document.getElementById('filter-errors').checked,\n");
+    html.push_str("    clean: document.getElementById('filter-clean').checked\n");
+    html.push_str("  };\n");
+    html.push_str("  const anyFilterActive = Object.values(filters).some(v => v);\n");
+    html.push_str("  const rows = document.querySelectorAll('.data-row');\n");
+    html.push_str("  rows.forEach(row => {\n");
+    html.push_str("    if (!anyFilterActive) { row.classList.remove('hidden'); return; }\n");
+    html.push_str("    const vulns = row.dataset.vulns.split(',').filter(v => v);\n");
+    html.push_str("    const hasClean = vulns.length === 0;\n");
+    html.push_str("    const shouldShow = (filters.http2 && vulns.includes('http2')) ||\n");
+    html.push_str("      (filters.host && vulns.includes('host')) ||\n");
+    html.push_str("      (filters.xff && vulns.includes('xff')) ||\n");
+    html.push_str("      (filters.csrf && vulns.includes('csrf')) ||\n");
+    html.push_str("      (filters.ssrf && vulns.includes('ssrf')) ||\n");
+    html.push_str("      (filters.reflection && vulns.includes('reflection')) ||\n");
+    html.push_str("      (filters.security && vulns.includes('security')) ||\n");
+    html.push_str("      (filters.errors && vulns.includes('errors')) ||\n");
+    html.push_str("      (filters.clean && hasClean);\n");
+    html.push_str("    if (shouldShow) { row.classList.remove('hidden'); }\n");
+    html.push_str("    else { row.classList.add('hidden'); }\n");
+    html.push_str("  });\n");
+    html.push_str("}\n");
+    html.push_str("</script>\n");
+
+    html.push_str("</head>\n<body>\n");
+
+    // Title
+    html.push_str("<h1>Terminus Scan Results</h1>\n");
+
+    // Summary section
+    html.push_str("<div class='summary'>\n");
+    html.push_str("<h2>Scan Summary</h2>\n");
+    html.push_str("<div class='stat-grid'>\n");
+    html.push_str(&format!("<div class='stat-card'><div class='stat-label'>Total Endpoints</div><div class='stat-value'>{}</div></div>\n", total_results));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>HTTP/2 Desync</div><div class='stat-value'>{}</div></div>\n", vuln_counts["http2_desync"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Host Injection</div><div class='stat-value'>{}</div></div>\n", vuln_counts["host_injection"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>XFF Bypass</div><div class='stat-value'>{}</div></div>\n", vuln_counts["xff_bypass"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>CSRF</div><div class='stat-value'>{}</div></div>\n", vuln_counts["csrf"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>SSRF</div><div class='stat-value'>{}</div></div>\n", vuln_counts["ssrf"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Reflection</div><div class='stat-value'>{}</div></div>\n", vuln_counts["reflection"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Security Issues</div><div class='stat-value'>{}</div></div>\n", vuln_counts["security_issues"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Error Messages</div><div class='stat-value'>{}</div></div>\n", vuln_counts["error_messages"]));
+    html.push_str("</div>\n</div>\n");
+
+    // Filters section
+    html.push_str("<div class='filters'>\n");
+    html.push_str("<strong>Filter by Vulnerability:</strong><br>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-http2' onchange='filterTable()'><label for='filter-http2'>HTTP/2 Desync</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-host' onchange='filterTable()'><label for='filter-host'>Host Injection</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-xff' onchange='filterTable()'><label for='filter-xff'>XFF Bypass</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-csrf' onchange='filterTable()'><label for='filter-csrf'>CSRF</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-ssrf' onchange='filterTable()'><label for='filter-ssrf'>SSRF</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-reflection' onchange='filterTable()'><label for='filter-reflection'>Reflection</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-security' onchange='filterTable()'><label for='filter-security'>Security Issues</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-errors' onchange='filterTable()'><label for='filter-errors'>Error Messages</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-clean' onchange='filterTable()'><label for='filter-clean'>Clean (No Issues)</label></div>\n");
+    html.push_str("</div>\n");
+
+    // Results table
+    html.push_str("<table>\n");
+    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Error</th></tr>\n");
+
+    for result in results {
+        let mut vuln_tags: Vec<String> = Vec::new();
+        let mut data_vulns = Vec::new();
+
+        // Build vulnerability badges and data attributes
+        if let Some(ref desync) = result.http2_desync {
+            if desync.desync_detected {
+                vuln_tags.push("<span class='vuln-badge'>HTTP/2 Desync</span>".to_string());
+                data_vulns.push("http2");
+            }
+        }
+        if let Some(ref host_inj) = result.host_injection {
+            if host_inj.injection_suspected {
+                vuln_tags.push("<span class='vuln-badge'>Host Injection</span>".to_string());
+                data_vulns.push("host");
+            }
+        }
+        if let Some(ref xff) = result.xff_bypass {
+            if xff.bypass_suspected {
+                vuln_tags.push("<span class='vuln-badge'>XFF Bypass</span>".to_string());
+                data_vulns.push("xff");
+            }
+        }
+        if let Some(ref csrf) = result.csrf_result {
+            if csrf.csrf_suspected {
+                vuln_tags.push("<span class='vuln-badge'>CSRF</span>".to_string());
+                data_vulns.push("csrf");
+            }
+        }
+        if let Some(ref ssrf) = result.ssrf_result {
+            if ssrf.ssrf_suspected {
+                vuln_tags.push("<span class='vuln-badge'>SSRF</span>".to_string());
+                data_vulns.push("ssrf");
+            }
+        }
+        if let Some(true) = result.reflection_detected {
+            vuln_tags.push("<span class='vuln-badge'>Reflection</span>".to_string());
+            data_vulns.push("reflection");
+        }
+        if let Some(ref sec_headers) = result.security_headers {
+            if !sec_headers.issues.is_empty() {
+                vuln_tags.push(format!("<span class='vuln-badge security'>Security Issues: {}</span>", sec_headers.issues.len()));
+                data_vulns.push("security");
+            }
+        }
+        if let Some(ref errors) = result.detected_errors {
+            if !errors.is_empty() {
+                vuln_tags.push(format!("<span class='vuln-badge security'>Error Messages: {}</span>", errors.len()));
+                data_vulns.push("errors");
+            }
+        }
+
+        let vuln_display = if vuln_tags.is_empty() {
+            "<span style='color:#27ae60;'>✓ Clean</span>".to_string()
+        } else {
+            vuln_tags.join(" ")
+        };
+
+        let data_vulns_str = data_vulns.join(",");
+
+        html.push_str(&format!("<tr class='data-row' data-vulns='{}'>", data_vulns_str));
+        html.push_str(&format!("<td>{}</td>", html_escape(&result.url)));
+        html.push_str(&format!("<td>{}</td>", html_escape(&result.method)));
         html.push_str(&format!("<td>{}</td>", result.status));
         html.push_str(&format!("<td>{}</td>", result.port));
-        html.push_str(&format!("<td>{}</td>", result.headers.as_deref().unwrap_or("")));
-        html.push_str(&format!("<td class='error'>{}</td>", result.error.as_deref().unwrap_or("")));
+        html.push_str(&format!("<td>{}</td>", vuln_display));
+        html.push_str(&format!("<td class='error'>{}</td>", html_escape(result.error.as_deref().unwrap_or(""))));
         html.push_str("</tr>\n");
     }
 
@@ -991,15 +1303,23 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     Ok(())
 }
 
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) -> Result<()> {
     let filename = format!("{}.csv", output_base.unwrap_or("terminus_results"));
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
 
     // Write CSV header
     if verbose {
-        writeln!(file, "URL,Method,Status,Port,Headers,Error")?;
+        writeln!(file, "URL,Method,Status,Port,Headers,Vulnerabilities,Error")?;
     } else {
-        writeln!(file, "URL,Method,Status,Port,Error")?;
+        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Error")?;
     }
 
     // Write CSV rows
@@ -1010,11 +1330,14 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         let port = result.port.to_string();
         let error = csv_escape(result.error.as_deref().unwrap_or(""));
 
+        let vuln_indicators = collect_vuln_indicators(result);
+        let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
+
         if verbose {
             let headers = csv_escape(result.headers.as_deref().unwrap_or(""));
-            writeln!(file, "{},{},{},{},{},{}", url, method, status, port, headers, error)?;
+            writeln!(file, "{},{},{},{},{},{},{}", url, method, status, port, headers, vulnerabilities, error)?;
         } else {
-            writeln!(file, "{},{},{},{},{}", url, method, status, port, error)?;
+            writeln!(file, "{},{},{},{},{},{}", url, method, status, port, vulnerabilities, error)?;
         }
     }
 
