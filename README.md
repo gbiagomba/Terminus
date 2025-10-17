@@ -111,6 +111,13 @@
 - **CSRF Vulnerability Detection**: Passively identify missing CSRF protections including Origin/Referer validation, SameSite cookies, X-Frame-Options, and CSP headers
 - **SSRF Vulnerability Detection**: Detect potential Server-Side Request Forgery (CWE-918) vulnerabilities by identifying suspicious URL parameters and response indicators
 
+### Performance & Usability Enhancements (v2.9.0)
+- **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution
+- **Smart Default Port Scanning**: Automatically scans ports 80 and 443 when no ports specified, while respecting ports from file inputs (nmap/testssl/nuclei)
+- **Enhanced Vulnerability Reporting**: All output formats now display vulnerability indicators with clear, actionable information
+- **Interactive HTML Reports**: Complete redesign with vulnerability summary dashboard, JavaScript filtering by vulnerability type, and visual badges
+- **Improved CSV Export**: Added dedicated "Vulnerabilities" column for easy data analysis and reporting
+
 ---
 
 ## Installation

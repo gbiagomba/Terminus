@@ -180,8 +180,8 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.8.0")
-        .about("URL testing with HTTP/2 desync detection, security analysis, and passive vulnerability detection")
+        .version("2.9.0")
+        .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
         .arg(Arg::new("method").short('X').long("method").value_name("METHOD").help("Specify the HTTP method to use (default: GET). Use ALL to test all methods"))
