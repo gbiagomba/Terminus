@@ -118,6 +118,13 @@
 - **Interactive HTML Reports**: Complete redesign with vulnerability summary dashboard, JavaScript filtering by vulnerability type, and visual badges
 - **Improved CSV Export**: Added dedicated "Vulnerabilities" column for easy data analysis and reporting
 
+### Protocol Handling & Enhanced Reporting (v2.10.0)
+- **Smart Protocol/Port Handling**: Respects `https://` and `http://` schemes - HTTPS URLs default to port 443, HTTP URLs default to port 80, eliminating unnecessary duplicate requests
+- **Detailed Security Issue Reporting**: Security headers and error messages now display full details instead of just counts (e.g., `[Security: Missing X-Frame-Options]` instead of `[Security Issues: 3]`)
+- **Request/Response Columns**: Added dedicated columns in CSV and HTML outputs for full request headers and response bodies, enabling better analysis and debugging
+- **Proxy Support for Vulnerability Checks**: Fixed HTTP/2 desync checks to properly route through configured proxy (Burp Suite, etc.) ensuring all requests are visible in proxy tools
+- **HTTP/3 Preparation**: Infrastructure updates for future HTTP/3 support (currently experimental in reqwest library)
+
 ---
 
 ## Installation

@@ -1,6 +1,6 @@
 [package]
 name = "terminus"
-version = "2.9.0"
+version = "2.10.0"
 edition = "2021"
 description = "CLI tool for HTTP endpoint testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, smart diffing, multi-threading, and enhanced reporting."
 license = "GPL-3.0"
@@ -12,6 +12,7 @@ repository = "https://github.com/your_github/terminus"
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 reqwest = { version = "0.12.23", features = ["blocking", "cookies", "http2"] }
+# Note: http3 feature is available but unstable - requires RUSTFLAGS='--cfg reqwest_unstable'
 rayon = "1.5.1"
 anyhow = "1.0"
 log = "0.4"

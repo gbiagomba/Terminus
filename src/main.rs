@@ -72,6 +72,8 @@ struct ScanResult {
     xff_bypass: Option<XffBypassResult>,
     csrf_result: Option<CsrfResult>,
     ssrf_result: Option<SsrfResult>,
+    request_headers: Option<String>,
+    response_body: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -180,7 +182,7 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.9.0")
+        .version("2.10.0")
         .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -439,14 +441,24 @@ fn main() -> Result<()> {
         // Check if URL already has a port specified
         let has_port = url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':'));
 
+        // Determine protocol from URL
+        let is_https = url.starts_with("https://");
+        let is_http = url.starts_with("http://");
+
         let test_ports = if has_port {
-            // URL already has a port (from nmap/testssl/nuclei), use a dummy port since we won't append it
+            // URL already has a port (from nmap/testssl/nuclei or user-specified in URL), use a dummy port since we won't append it
             vec![0]
         } else if !ports.is_empty() {
             // User specified ports via -p flag
             ports.clone()
+        } else if is_https {
+            // HTTPS protocol specified, use port 443 only
+            vec![443]
+        } else if is_http {
+            // HTTP protocol specified, use port 80 only
+            vec![80]
         } else {
-            // No ports specified and URL has no port - scan both 80 and 443 by default
+            // No protocol/scheme specified - scan both 80 and 443 by default
             vec![80, 443]
         };
 
@@ -484,6 +496,9 @@ fn main() -> Result<()> {
             format!("{}:{}", url, port)
         };
 
+        // Capture request headers for detailed output
+        let request_headers_str = flatten_headers(&custom_headers);
+
         match client.request(req_method.clone(), &full_url)
                     .headers(custom_headers.clone())
                     .send() {
@@ -504,12 +519,11 @@ fn main() -> Result<()> {
                         // Store headers for security analysis
                         let response_headers = resp.headers().clone();
 
-                        // Read response body if needed for analysis
-                        let body_text = if check_body || extract_links || grep_pattern.is_some() || detect_errors || detect_reflection {
-                            resp.text().ok()
-                        } else {
-                            None
-                        };
+                        // Always read response body for detailed output and analysis
+                        let body_text = resp.text().ok();
+
+                        // Clone body for storage
+                        let response_body = body_text.clone();
 
                         // Extract body preview (first 200 chars) if check_body is enabled
                         let body_preview = if check_body {
@@ -589,7 +603,8 @@ fn main() -> Result<()> {
 
                         // Perform HTTP/2 desync check if requested
                         let http2_desync = if http2_desync_check && full_url.starts_with("https") {
-                            Some(perform_http2_desync_check(&client, &full_url, &req_method, &custom_headers, status.as_u16()))
+                            let proxy_url_opt = matches.get_one::<String>("proxy").map(|s| s.as_str());
+                            Some(perform_http2_desync_check(&client, &full_url, &req_method, &custom_headers, status.as_u16(), proxy_url_opt))
                         } else {
                             None
                         };
@@ -642,6 +657,8 @@ fn main() -> Result<()> {
                                     xff_bypass,
                                     csrf_result,
                                     ssrf_result,
+                                    request_headers: Some(request_headers_str.clone()),
+                                    response_body,
                                 });
                             }
                         }
@@ -666,6 +683,8 @@ fn main() -> Result<()> {
                                 xff_bypass: None,
                                 csrf_result: None,
                                 ssrf_result: None,
+                                request_headers: Some(request_headers_str.clone()),
+                                response_body: None,
                             });
                         }
                     }
@@ -995,17 +1014,21 @@ fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
         indicators.push("[Reflection Detected]".to_string());
     }
 
-    // Security Headers Issues
+    // Security Headers Issues - show detailed issues
     if let Some(ref sec_headers) = result.security_headers {
         if !sec_headers.issues.is_empty() {
-            indicators.push(format!("[Security Issues: {}]", sec_headers.issues.len()));
+            for issue in &sec_headers.issues {
+                indicators.push(format!("[Security: {}]", issue));
+            }
         }
     }
 
-    // Detected Errors
+    // Detected Errors - show detailed error types
     if let Some(ref errors) = result.detected_errors {
         if !errors.is_empty() {
-            indicators.push(format!("[Error Messages: {}]", errors.len()));
+            for error in errors {
+                indicators.push(format!("[Error: {}]", error));
+            }
         }
     }
 
@@ -1236,7 +1259,7 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
 
     // Results table
     html.push_str("<table>\n");
-    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Error</th></tr>\n");
+    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request Headers</th><th>Response Body</th><th>Error</th></tr>\n");
 
     for result in results {
         let mut vuln_tags: Vec<String> = Vec::new();
@@ -1304,6 +1327,27 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         html.push_str(&format!("<td>{}</td>", result.status));
         html.push_str(&format!("<td>{}</td>", result.port));
         html.push_str(&format!("<td>{}</td>", vuln_display));
+
+        // Add request headers with truncation for display
+        let req_headers_display = result.request_headers.as_deref().unwrap_or("");
+        let req_headers_truncated = if req_headers_display.len() > 200 {
+            format!("{}...", &req_headers_display[..200])
+        } else {
+            req_headers_display.to_string()
+        };
+        html.push_str(&format!("<td style='font-size:0.8em; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;' title='{}'>{}</td>",
+            html_escape(req_headers_display), html_escape(&req_headers_truncated)));
+
+        // Add response body with truncation for display
+        let resp_body_display = result.response_body.as_deref().unwrap_or("");
+        let resp_body_truncated = if resp_body_display.len() > 200 {
+            format!("{}...", &resp_body_display[..200])
+        } else {
+            resp_body_display.to_string()
+        };
+        html.push_str(&format!("<td style='font-size:0.8em; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;' title='{}'>{}</td>",
+            html_escape(resp_body_display), html_escape(&resp_body_truncated)));
+
         html.push_str(&format!("<td class='error'>{}</td>", html_escape(result.error.as_deref().unwrap_or(""))));
         html.push_str("</tr>\n");
     }
@@ -1328,9 +1372,9 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
 
     // Write CSV header
     if verbose {
-        writeln!(file, "URL,Method,Status,Port,Headers,Vulnerabilities,Error")?;
+        writeln!(file, "URL,Method,Status,Port,Headers,Vulnerabilities,Request Headers,Response Body,Error")?;
     } else {
-        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Error")?;
+        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Request Headers,Response Body,Error")?;
     }
 
     // Write CSV rows
@@ -1344,11 +1388,14 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         let vuln_indicators = collect_vuln_indicators(result);
         let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
 
+        let request_headers = csv_escape(result.request_headers.as_deref().unwrap_or(""));
+        let response_body = csv_escape(result.response_body.as_deref().unwrap_or(""));
+
         if verbose {
             let headers = csv_escape(result.headers.as_deref().unwrap_or(""));
-            writeln!(file, "{},{},{},{},{},{},{}", url, method, status, port, headers, vulnerabilities, error)?;
+            writeln!(file, "{},{},{},{},{},{},{},{},{}", url, method, status, port, headers, vulnerabilities, request_headers, response_body, error)?;
         } else {
-            writeln!(file, "{},{},{},{},{},{}", url, method, status, port, vulnerabilities, error)?;
+            writeln!(file, "{},{},{},{},{},{},{},{}", url, method, status, port, vulnerabilities, request_headers, response_body, error)?;
         }
     }
 
@@ -1698,6 +1745,7 @@ fn perform_http2_desync_check(
     method: &Method,
     headers: &HeaderMap,
     http1_status: u16,
+    proxy_url: Option<&str>,
 ) -> Http2DesyncResult {
     let mut issues = Vec::new();
     let mut desync_detected = false;
@@ -1705,12 +1753,18 @@ fn perform_http2_desync_check(
     let mut status_mismatch = false;
     let mut response_diff = None;
 
-    // Create separate clients for HTTP/1.1 and HTTP/2
-    let http1_client = match ClientBuilder::new()
+    // Create separate clients for HTTP/1.1 and HTTP/2 with proxy support
+    let mut http1_builder = ClientBuilder::new()
         .danger_accept_invalid_certs(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+        .redirect(reqwest::redirect::Policy::none());
+
+    if let Some(proxy) = proxy_url {
+        if let Ok(p) = reqwest::Proxy::all(proxy) {
+            http1_builder = http1_builder.proxy(p);
+        }
+    }
+
+    let http1_client = match http1_builder.build() {
         Ok(client) => client,
         Err(e) => {
             issues.push(format!("Failed to create HTTP/1.1 client: {}", e));
@@ -1725,12 +1779,18 @@ fn perform_http2_desync_check(
         }
     };
 
-    let http2_client = match ClientBuilder::new()
+    let mut http2_builder = ClientBuilder::new()
         .danger_accept_invalid_certs(true)
         .redirect(reqwest::redirect::Policy::none())
-        .http2_prior_knowledge()
-        .build()
-    {
+        .http2_prior_knowledge();
+
+    if let Some(proxy) = proxy_url {
+        if let Ok(p) = reqwest::Proxy::all(proxy) {
+            http2_builder = http2_builder.proxy(p);
+        }
+    }
+
+    let http2_client = match http2_builder.build() {
         Ok(client) => client,
         Err(e) => {
             issues.push(format!("Failed to create HTTP/2 client: {}", e));
