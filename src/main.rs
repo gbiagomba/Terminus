@@ -182,7 +182,7 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.10.0")
+        .version("2.10.1")
         .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -216,7 +216,7 @@ fn main() -> Result<()> {
         .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
         .arg(Arg::new("scan-level").long("scan-level").value_name("LEVEL").help("Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)"))
-        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("10").help("Number of concurrent threads for scanning (default: 10)"))
+        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("10").help("Number of concurrent threads for scanning"))
         .get_matches();
 
     let verbose = matches.get_flag("verbose");
@@ -289,13 +289,10 @@ fn main() -> Result<()> {
         .context("Invalid regex pattern")?;
 
     // Parse proxy if provided
+    // Always disable automatic redirects - we'll handle them manually to log each step
     let mut client_builder = ClientBuilder::new()
         .danger_accept_invalid_certs(allow_insecure)
-        .redirect(if follow_redirects {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        });
+        .redirect(reqwest::redirect::Policy::none());
 
     if let Some(proxy_url) = matches.get_one::<String>("proxy") {
         let proxy = reqwest::Proxy::all(proxy_url)
@@ -487,13 +484,23 @@ fn main() -> Result<()> {
             std::thread::sleep(std::time::Duration::from_secs(delay));
         }
 
-        // Only append port if URL doesn't already have one
+        // Only append port if URL doesn't already have one AND it's not a standard port
         let full_url = if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
             // URL already has a port, use it as-is
             url.clone()
         } else {
-            // No port in URL, append it
-            format!("{}:{}", url, port)
+            // Check if this is a standard port for the protocol
+            let is_https = url.starts_with("https://");
+            let is_http = url.starts_with("http://");
+            let is_standard_port = (is_https && *port == 443) || (is_http && *port == 80);
+
+            if is_standard_port {
+                // Don't append standard ports (80 for HTTP, 443 for HTTPS)
+                url.clone()
+            } else {
+                // Append non-standard port
+                format!("{}:{}", url, port)
+            }
         };
 
         // Capture request headers for detailed output
@@ -644,7 +651,7 @@ fn main() -> Result<()> {
                                     method: method.clone(),
                                     status: status.as_u16(),
                                     port: *port,
-                                    headers: headers_str,
+                                    headers: headers_str.clone(),
                                     error: None,
                                     body_preview,
                                     matched_patterns,
@@ -660,6 +667,88 @@ fn main() -> Result<()> {
                                     request_headers: Some(request_headers_str.clone()),
                                     response_body,
                                 });
+                            }
+                        }
+
+                        // Handle redirects manually if -L flag is set
+                        if follow_redirects && status.is_redirection() {
+                            if let Some(location) = response_headers.get(reqwest::header::LOCATION) {
+                                if let Ok(location_str) = location.to_str() {
+                                    let mut redirect_url = location_str.to_string();
+                                    let mut redirect_count = 0;
+                                    let max_redirects = 10;
+
+                                    while redirect_count < max_redirects {
+                                        // Make the redirect URL absolute if it's relative
+                                        if redirect_url.starts_with('/') {
+                                            // Relative URL - construct absolute URL
+                                            if let Ok(base_url) = reqwest::Url::parse(&full_url) {
+                                                if let Ok(absolute_url) = base_url.join(&redirect_url) {
+                                                    redirect_url = absolute_url.to_string();
+                                                }
+                                            }
+                                        }
+
+                                        // Follow the redirect
+                                        match client.request(req_method.clone(), &redirect_url)
+                                            .headers(custom_headers.clone())
+                                            .send() {
+                                            Ok(redirect_resp) => {
+                                                let redirect_status = redirect_resp.status();
+                                                let redirect_headers = redirect_resp.headers().clone();
+                                                let redirect_headers_str = if verbose {
+                                                    Some(flatten_headers(&redirect_headers))
+                                                } else {
+                                                    None
+                                                };
+                                                let redirect_body = redirect_resp.text().ok();
+
+                                                // Log this redirect step
+                                                if let Ok(mut results_guard) = results.lock() {
+                                                    results_guard.push(ScanResult {
+                                                        url: redirect_url.clone(),
+                                                        method: method.clone(),
+                                                        status: redirect_status.as_u16(),
+                                                        port: *port,
+                                                        headers: redirect_headers_str,
+                                                        error: None,
+                                                        body_preview: None,
+                                                        matched_patterns: None,
+                                                        extracted_links: None,
+                                                        security_headers: None,
+                                                        detected_errors: None,
+                                                        reflection_detected: None,
+                                                        http2_desync: None,
+                                                        host_injection: None,
+                                                        xff_bypass: None,
+                                                        csrf_result: None,
+                                                        ssrf_result: None,
+                                                        request_headers: Some(request_headers_str.clone()),
+                                                        response_body: redirect_body,
+                                                    });
+                                                }
+
+                                                // Check if this is another redirect
+                                                if redirect_status.is_redirection() {
+                                                    if let Some(next_location) = redirect_headers.get(reqwest::header::LOCATION) {
+                                                        if let Ok(next_location_str) = next_location.to_str() {
+                                                            redirect_url = next_location_str.to_string();
+                                                            redirect_count += 1;
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+
+                                                // Not a redirect or no location header - stop following
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                // Error following redirect - stop
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
