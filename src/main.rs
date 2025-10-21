@@ -182,7 +182,7 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.10.1")
+        .version("2.10.2")
         .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -1348,7 +1348,7 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
 
     // Results table
     html.push_str("<table>\n");
-    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request Headers</th><th>Response Body</th><th>Error</th></tr>\n");
+    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request</th><th>Response</th><th>Error</th></tr>\n");
 
     for result in results {
         let mut vuln_tags: Vec<String> = Vec::new();
@@ -1391,13 +1391,19 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         }
         if let Some(ref sec_headers) = result.security_headers {
             if !sec_headers.issues.is_empty() {
-                vuln_tags.push(format!("<span class='vuln-badge security'>Security Issues: {}</span>", sec_headers.issues.len()));
+                // Show detailed security issues instead of just count
+                for issue in &sec_headers.issues {
+                    vuln_tags.push(format!("<span class='vuln-badge security' title='Security Issue'>{}</span>", html_escape(issue)));
+                }
                 data_vulns.push("security");
             }
         }
         if let Some(ref errors) = result.detected_errors {
             if !errors.is_empty() {
-                vuln_tags.push(format!("<span class='vuln-badge security'>Error Messages: {}</span>", errors.len()));
+                // Show detailed error messages instead of just count
+                for error in errors {
+                    vuln_tags.push(format!("<span class='vuln-badge security' title='Error Detected'>{}</span>", html_escape(error)));
+                }
                 data_vulns.push("errors");
             }
         }
@@ -1417,25 +1423,33 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         html.push_str(&format!("<td>{}</td>", result.port));
         html.push_str(&format!("<td>{}</td>", vuln_display));
 
-        // Add request headers with truncation for display
+        // Add request headers in expandable details
         let req_headers_display = result.request_headers.as_deref().unwrap_or("");
-        let req_headers_truncated = if req_headers_display.len() > 200 {
-            format!("{}...", &req_headers_display[..200])
-        } else {
-            req_headers_display.to_string()
-        };
-        html.push_str(&format!("<td style='font-size:0.8em; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;' title='{}'>{}</td>",
-            html_escape(req_headers_display), html_escape(&req_headers_truncated)));
+        html.push_str("<td style='font-size:0.8em; max-width:300px;'>");
+        if !req_headers_display.is_empty() {
+            html.push_str("<details><summary style='cursor:pointer; color:#3498db;'>View Headers</summary>");
+            html.push_str(&format!("<pre style='margin:5px 0; padding:10px; background:#f8f9fa; border-radius:4px; overflow-x:auto; max-height:300px; font-size:0.9em;'>{}</pre>", html_escape(req_headers_display)));
+            html.push_str("</details>");
+        }
+        html.push_str("</td>");
 
-        // Add response body with truncation for display
+        // Add response body in expandable details with response headers
+        let resp_headers_display = result.headers.as_deref().unwrap_or("");
         let resp_body_display = result.response_body.as_deref().unwrap_or("");
-        let resp_body_truncated = if resp_body_display.len() > 200 {
-            format!("{}...", &resp_body_display[..200])
-        } else {
-            resp_body_display.to_string()
-        };
-        html.push_str(&format!("<td style='font-size:0.8em; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;' title='{}'>{}</td>",
-            html_escape(resp_body_display), html_escape(&resp_body_truncated)));
+        html.push_str("<td style='font-size:0.8em; max-width:400px;'>");
+        if !resp_headers_display.is_empty() || !resp_body_display.is_empty() {
+            html.push_str("<details><summary style='cursor:pointer; color:#3498db;'>View Response</summary>");
+            if !resp_headers_display.is_empty() {
+                html.push_str("<strong>Response Headers:</strong>");
+                html.push_str(&format!("<pre style='margin:5px 0; padding:10px; background:#e8f4f8; border-radius:4px; overflow-x:auto; max-height:200px; font-size:0.9em;'>{}</pre>", html_escape(resp_headers_display)));
+            }
+            if !resp_body_display.is_empty() {
+                html.push_str("<strong>Response Body:</strong>");
+                html.push_str(&format!("<pre style='margin:5px 0; padding:10px; background:#f8f9fa; border-radius:4px; overflow-x:auto; max-height:300px; font-size:0.9em;'>{}</pre>", html_escape(resp_body_display)));
+            }
+            html.push_str("</details>");
+        }
+        html.push_str("</td>");
 
         html.push_str(&format!("<td class='error'>{}</td>", html_escape(result.error.as_deref().unwrap_or(""))));
         html.push_str("</tr>\n");
@@ -1459,12 +1473,8 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
     let filename = format!("{}.csv", output_base.unwrap_or("terminus_results"));
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
 
-    // Write CSV header
-    if verbose {
-        writeln!(file, "URL,Method,Status,Port,Headers,Vulnerabilities,Request Headers,Response Body,Error")?;
-    } else {
-        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Request Headers,Response Body,Error")?;
-    }
+    // Write CSV header - always include all columns
+    writeln!(file, "URL,Method,Status,Port,Response Headers,Vulnerabilities,Request Headers,Response Body,Error")?;
 
     // Write CSV rows
     for result in results {
@@ -1478,14 +1488,10 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
 
         let request_headers = csv_escape(result.request_headers.as_deref().unwrap_or(""));
+        let response_headers = csv_escape(result.headers.as_deref().unwrap_or(""));
         let response_body = csv_escape(result.response_body.as_deref().unwrap_or(""));
 
-        if verbose {
-            let headers = csv_escape(result.headers.as_deref().unwrap_or(""));
-            writeln!(file, "{},{},{},{},{},{},{},{},{}", url, method, status, port, headers, vulnerabilities, request_headers, response_body, error)?;
-        } else {
-            writeln!(file, "{},{},{},{},{},{},{},{}", url, method, status, port, vulnerabilities, request_headers, response_body, error)?;
-        }
+        writeln!(file, "{},{},{},{},{},{},{},{},{}", url, method, status, port, response_headers, vulnerabilities, request_headers, response_body, error)?;
     }
 
     eprintln!("Results written to {}", filename);

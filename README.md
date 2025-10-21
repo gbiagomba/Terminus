@@ -69,6 +69,7 @@
   - File-based: Automatically uses ports from nmap/testssl/nuclei scan outputs
   - URL-embedded: Respects ports already specified in URLs (e.g., `http://example.com:8080`)
 - **HTTP Version Control**: Force HTTP/1.0, 1.1, or 2.0 using `--http-version`
+  - **Note**: HTTP/3 is not currently supported due to limitations in the reqwest library's blocking API. HTTP/3 requires QUIC protocol and async runtime, which would require a complete rewrite of the tool. This may be added in a future major version.
 - **Status Code Filtering**: Filter responses by status code using `-F`
 
 ### Advanced Features
