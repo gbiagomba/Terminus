@@ -53,21 +53,38 @@
 - **Multiple Output Formats**: stdout, txt, json, html, csv, or all formats simultaneously
 - **Output Format Control**: Use `--output-format` to specify desired format(s)
 - **Custom Output Location**: Specify output file base name with `-o` flag
-- **CSV Export**: Generate CSV files for easy data analysis and import into spreadsheets
+- **Vulnerability Indicators**: All output formats (stdout, txt, csv, html) display detected vulnerabilities with clear indicators
+- **Enhanced HTML Reports**: Interactive HTML reports with:
+  - Vulnerability summary dashboard with statistics
+  - JavaScript-powered filtering by vulnerability type
+  - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Security Issues, Error Messages)
+  - Clean/Pass indicators for endpoints with no vulnerabilities
+- **CSV Export**: Generate CSV files with vulnerability columns for easy data analysis and import into spreadsheets
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
-- **Multiple Ports**: Specify comma-separated ports like `80,443` with `-p` flag
+- **Smart Port Scanning**:
+  - Default: Scans ports 80 and 443 when no `-p` flag is specified
+  - Custom Ports: Specify comma-separated ports like `80,443,8080` with `-p` flag
+  - File-based: Automatically uses ports from nmap/testssl/nuclei scan outputs
+  - URL-embedded: Respects ports already specified in URLs (e.g., `http://example.com:8080`)
 - **HTTP Version Control**: Force HTTP/1.0, 1.1, or 2.0 using `--http-version`
+  - **Note**: HTTP/3 is not currently supported due to limitations in the reqwest library's blocking API. HTTP/3 requires QUIC protocol and async runtime, which would require a complete rewrite of the tool. This may be added in a future major version.
 - **Status Code Filtering**: Filter responses by status code using `-F`
 
 ### Advanced Features
+- **Concurrent Scanning**: Multi-threaded scanning with configurable thread count using `-t/--threads` flag (default: 10 threads)
 - **Proxy Support**: Route traffic through proxy tools like Burp Suite using `-x` flag
 - **Custom Headers**: Add headers via `-H` flag (multiple allowed) or `--header-file`
 - **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
 - **TLS/SSL Options**: Allow insecure connections with `-k` flag
 - **Redirect Handling**: Follow redirects with `-L` flag
 - **Verbose Output**: View detailed response headers with `-v` flag
+- **Scan Level Presets**: Predefined security scan configurations with `--scan-level` flag:
+  - `quick`: Basic HTTP requests only (default behavior)
+  - `standard`: Security headers, error detection, and reflection checks
+  - `full`: All features including body analysis and link extraction
+  - `vuln`: All vulnerability detection features (HTTP/2 desync, Host injection, XFF bypass, CSRF, SSRF)
 
 ### Smart Analysis Features (v2.5.0)
 - **Smart Diffing**: Compare two scans and identify new/removed endpoints and status changes
@@ -94,6 +111,20 @@
 - **X-Forwarded-For Bypass Detection**: Detect IP-based access control bypasses by comparing baseline requests with X-Forwarded-For header modifications
 - **CSRF Vulnerability Detection**: Passively identify missing CSRF protections including Origin/Referer validation, SameSite cookies, X-Frame-Options, and CSP headers
 - **SSRF Vulnerability Detection**: Detect potential Server-Side Request Forgery (CWE-918) vulnerabilities by identifying suspicious URL parameters and response indicators
+
+### Performance & Usability Enhancements (v2.9.0)
+- **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution
+- **Smart Default Port Scanning**: Automatically scans ports 80 and 443 when no ports specified, while respecting ports from file inputs (nmap/testssl/nuclei)
+- **Enhanced Vulnerability Reporting**: All output formats now display vulnerability indicators with clear, actionable information
+- **Interactive HTML Reports**: Complete redesign with vulnerability summary dashboard, JavaScript filtering by vulnerability type, and visual badges
+- **Improved CSV Export**: Added dedicated "Vulnerabilities" column for easy data analysis and reporting
+
+### Protocol Handling & Enhanced Reporting (v2.10.0)
+- **Smart Protocol/Port Handling**: Respects `https://` and `http://` schemes - HTTPS URLs default to port 443, HTTP URLs default to port 80, eliminating unnecessary duplicate requests
+- **Detailed Security Issue Reporting**: Security headers and error messages now display full details instead of just counts (e.g., `[Security: Missing X-Frame-Options]` instead of `[Security Issues: 3]`)
+- **Request/Response Columns**: Added dedicated columns in CSV and HTML outputs for full request headers and response bodies, enabling better analysis and debugging
+- **Proxy Support for Vulnerability Checks**: Fixed HTTP/2 desync checks to properly route through configured proxy (Burp Suite, etc.) ensuring all requests are visible in proxy tools
+- **HTTP/3 Preparation**: Infrastructure updates for future HTTP/3 support (currently experimental in reqwest library)
 
 ---
 
@@ -196,6 +227,8 @@ Options:
       --detect-xff-bypass          Detect X-Forwarded-For bypass by comparing baseline and XFF requests
       --detect-csrf                Passively detect potential CSRF vulnerabilities and missing protections
       --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
+      --scan-level <LEVEL>         Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)
+  -t, --threads <NUM>              Number of concurrent threads for scanning (default: 10)
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -205,12 +238,12 @@ Options:
 
 #### Basic Usage
 
-**Test a single URL**:
+**Test a single URL (scans both port 80 and 443 by default)**:
 ```bash
 terminus -u http://example.com
 ```
 
-**Test an IPv4 address**:
+**Test an IPv4 address (scans ports 80 and 443)**:
 ```bash
 terminus -u 192.168.1.1
 ```
@@ -220,36 +253,48 @@ terminus -u 192.168.1.1
 terminus -u "2001:db8::1" -6
 ```
 
+**Test with custom ports**:
+```bash
+terminus -u http://example.com -p 8080,8443
+```
+
 **Test multiple URLs from a file**:
 ```bash
-terminus -f urls.txt -p 80,443 -X ALL
+terminus -f urls.txt -X ALL
+```
+
+**Test specific ports only**:
+```bash
+terminus -f urls.txt -p 80,443,8080 -X ALL
 ```
 
 #### Input Format Examples
 
-**Parse nmap XML output**:
+**Parse nmap XML output (uses ports from nmap scan)**:
 ```bash
-nmap -p80,443 -oX scan.xml target.com
+nmap -p80,443,8080 -oX scan.xml target.com
 terminus -f scan.xml
 ```
 
-**Parse nmap greppable output**:
+**Parse nmap greppable output (uses ports from nmap scan)**:
 ```bash
 nmap -p80,443 -oG scan.gnmap target.com
 terminus -f scan.gnmap
 ```
 
-**Parse testssl.sh JSON output**:
+**Parse testssl.sh JSON output (uses ports from testssl scan)**:
 ```bash
 testssl --json-pretty target.com > testssl.json
 terminus -f testssl.json
 ```
 
-**Parse ProjectDiscovery tool output**:
+**Parse ProjectDiscovery tool output (uses discovered URLs with ports)**:
 ```bash
 echo "target.com" | katana -json -o katana.json
 terminus -f katana.json
 ```
+
+**Note**: When using file inputs, Terminus automatically uses the ports specified in the scan output. No `-p` flag needed!
 
 #### Piping Examples
 
@@ -322,6 +367,50 @@ terminus -u https://api.example.com -X POST \
   --http-version 2 \
   --output-format all \
   -o pentest_results
+```
+
+**Scan Level Preset Examples**:
+```bash
+# Quick scan - basic requests only (fastest)
+terminus -f urls.txt --scan-level quick
+
+# Standard scan - security headers, errors, and reflection detection
+terminus -f production_urls.txt --scan-level standard -o standard_scan
+
+# Full scan - all features including body analysis
+terminus -f targets.txt --scan-level full --rate-limit 10/s -o full_scan
+
+# Vulnerability scan - all passive vulnerability detection
+terminus -f api_endpoints.txt --scan-level vuln -k -o vuln_scan
+
+# Override preset with individual flags
+terminus -f urls.txt --scan-level standard --detect-host-injection -o custom_scan
+
+# Combine preset with other flags
+terminus -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
+```
+
+**Concurrent Scanning with Threading**:
+```bash
+# Fast scan with 20 concurrent threads
+terminus -f large_url_list.txt -t 20 -o fast_scan
+
+# Balanced scanning with 10 threads (default)
+terminus -f urls.txt --scan-level vuln -o balanced_scan
+
+# Conservative scanning with 5 threads for production
+terminus -f production_endpoints.txt -t 5 --rate-limit 10/s -o conservative_scan
+
+# Maximum speed scan with 50 threads
+terminus -f urls.txt -t 50 --output-format all -o speed_scan
+
+# Thread control with vulnerability detection
+terminus -f targets.txt \
+  -t 15 \
+  --scan-level vuln \
+  --rate-limit 20/s \
+  --output-format json \
+  -o threaded_vuln_scan
 ```
 
 #### Smart Analysis Examples (v2.5.0)

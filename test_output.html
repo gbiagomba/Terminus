@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='UTF-8'>
+<title>Terminus Scan Results</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f5f5f5;}
+h1{color:#2c3e50;}
+.summary{background:#fff;padding:20px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+.summary h2{margin-top:0;color:#2c3e50;}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:15px;}
+.stat-card{background:#f8f9fa;padding:15px;border-radius:6px;border-left:4px solid #4CAF50;}
+.stat-card.vuln{border-left-color:#e74c3c;}
+.stat-label{font-size:12px;color:#7f8c8d;text-transform:uppercase;}
+.stat-value{font-size:24px;font-weight:bold;color:#2c3e50;margin-top:5px;}
+.filters{background:#fff;padding:15px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+.filter-group{display:inline-block;margin-right:15px;margin-bottom:10px;}
+.filter-group label{margin-left:5px;}
+table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+th,td{border:1px solid #ddd;padding:12px;text-align:left;}
+th{background-color:#4CAF50;color:white;position:sticky;top:0;}
+tr:nth-child(even){background-color:#f8f9fa;}
+tr:hover{background-color:#e8f5e9;}
+.error{color:#e74c3c;font-weight:bold;}
+.vuln-badge{display:inline-block;background:#e74c3c;color:white;padding:4px 8px;border-radius:4px;font-size:11px;margin:2px;}
+.vuln-badge.security{background:#f39c12;}
+.hidden{display:none;}
+</style>
+<script>
+function filterTable() {
+  const filters = {
+    http2: document.getElementById('filter-http2').checked,
+    host: document.getElementById('filter-host').checked,
+    xff: document.getElementById('filter-xff').checked,
+    csrf: document.getElementById('filter-csrf').checked,
+    ssrf: document.getElementById('filter-ssrf').checked,
+    reflection: document.getElementById('filter-reflection').checked,
+    security: document.getElementById('filter-security').checked,
+    errors: document.getElementById('filter-errors').checked,
+    clean: document.getElementById('filter-clean').checked
+  };
+  const anyFilterActive = Object.values(filters).some(v => v);
+  const rows = document.querySelectorAll('.data-row');
+  rows.forEach(row => {
+    if (!anyFilterActive) { row.classList.remove('hidden'); return; }
+    const vulns = row.dataset.vulns.split(',').filter(v => v);
+    const hasClean = vulns.length === 0;
+    const shouldShow = (filters.http2 && vulns.includes('http2')) ||
+      (filters.host && vulns.includes('host')) ||
+      (filters.xff && vulns.includes('xff')) ||
+      (filters.csrf && vulns.includes('csrf')) ||
+      (filters.ssrf && vulns.includes('ssrf')) ||
+      (filters.reflection && vulns.includes('reflection')) ||
+      (filters.security && vulns.includes('security')) ||
+      (filters.errors && vulns.includes('errors')) ||
+      (filters.clean && hasClean);
+    if (shouldShow) { row.classList.remove('hidden'); }
+    else { row.classList.add('hidden'); }
+  });
+}
+</script>
+</head>
+<body>
+<h1>Terminus Scan Results</h1>
+<div class='summary'>
+<h2>Scan Summary</h2>
+<div class='stat-grid'>
+<div class='stat-card'><div class='stat-label'>Total Endpoints</div><div class='stat-value'>1</div></div>
+<div class='stat-card vuln'><div class='stat-label'>HTTP/2 Desync</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>Host Injection</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>XFF Bypass</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>CSRF</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>SSRF</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>Reflection</div><div class='stat-value'>0</div></div>
+<div class='stat-card vuln'><div class='stat-label'>Security Issues</div><div class='stat-value'>1</div></div>
+<div class='stat-card vuln'><div class='stat-label'>Error Messages</div><div class='stat-value'>0</div></div>
+</div>
+</div>
+<div class='filters'>
+<strong>Filter by Vulnerability:</strong><br>
+<div class='filter-group'><input type='checkbox' id='filter-http2' onchange='filterTable()'><label for='filter-http2'>HTTP/2 Desync</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-host' onchange='filterTable()'><label for='filter-host'>Host Injection</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-xff' onchange='filterTable()'><label for='filter-xff'>XFF Bypass</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-csrf' onchange='filterTable()'><label for='filter-csrf'>CSRF</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-ssrf' onchange='filterTable()'><label for='filter-ssrf'>SSRF</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-reflection' onchange='filterTable()'><label for='filter-reflection'>Reflection</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-security' onchange='filterTable()'><label for='filter-security'>Security Issues</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-errors' onchange='filterTable()'><label for='filter-errors'>Error Messages</label></div>
+<div class='filter-group'><input type='checkbox' id='filter-clean' onchange='filterTable()'><label for='filter-clean'>Clean (No Issues)</label></div>
+</div>
+<table>
+<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request</th><th>Response</th><th>Error</th></tr>
+<tr class='data-row' data-vulns='security'><td>https://httpbin.org</td><td>GET</td><td>200</td><td>443</td><td><span class='vuln-badge security' title='Security Issue'>Server header exposes version information</span> <span class='vuln-badge security' title='Security Issue'>CORS allows all origins (*)</span></td><td style='font-size:0.8em; max-width:300px;'></td><td style='font-size:0.8em; max-width:400px;'><details><summary style='cursor:pointer; color:#3498db;'>View Response</summary><strong>Response Body:</strong><pre style='margin:5px 0; padding:10px; background:#f8f9fa; border-radius:4px; overflow-x:auto; max-height:300px; font-size:0.9em;'>&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+
+&lt;head&gt;
+    &lt;meta charset=&quot;UTF-8&quot;&gt;
+    &lt;title&gt;httpbin.org&lt;/title&gt;
+    &lt;link href=&quot;https://fonts.googleapis.com/css?family=Open+Sans:400,700|Source+Code+Pro:300,600|Titillium+Web:400,600,700&quot;
+        rel=&quot;stylesheet&quot;&gt;
+    &lt;link rel=&quot;stylesheet&quot; type=&quot;text/css&quot; href=&quot;/flasgger_static/swagger-ui.css&quot;&gt;
+    &lt;link rel=&quot;icon&quot; type=&quot;image/png&quot; href=&quot;/static/favicon.ico&quot; sizes=&quot;64x64 32x32 16x16&quot; /&gt;
+    &lt;style&gt;
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+
+        *,
+        *:before,
+        *:after {
+            box-sizing: inherit;
+        }
+
+        body {
+            margin: 0;
+            background: #fafafa;
+        }
+    &lt;/style&gt;
+&lt;/head&gt;
+
+&lt;body&gt;
+    &lt;a href=&quot;https://github.com/requests/httpbin&quot; class=&quot;github-corner&quot; aria-label=&quot;View source on Github&quot;&gt;
+        &lt;svg width=&quot;80&quot; height=&quot;80&quot; viewBox=&quot;0 0 250 250&quot; style=&quot;fill:#151513; color:#fff; position: absolute; top: 0; border: 0; right: 0;&quot;
+            aria-hidden=&quot;true&quot;&gt;
+            &lt;path d=&quot;M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z&quot;&gt;&lt;/path&gt;
+            &lt;path d=&quot;M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2&quot;
+                fill=&quot;currentColor&quot; style=&quot;transform-origin: 130px 106px;&quot; class=&quot;octo-arm&quot;&gt;&lt;/path&gt;
+            &lt;path d=&quot;M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z&quot;
+                fill=&quot;currentColor&quot; class=&quot;octo-body&quot;&gt;&lt;/path&gt;
+        &lt;/svg&gt;
+    &lt;/a&gt;
+    &lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot; xmlns:xlink=&quot;http://www.w3.org/1999/xlink&quot; style=&quot;position:absolute;width:0;height:0&quot;&gt;
+        &lt;defs&gt;
+            &lt;symbol viewBox=&quot;0 0 20 20&quot; id=&quot;unlocked&quot;&gt;
+                &lt;path d=&quot;M15.8 8H14V5.6C14 2.703 12.665 1 10 1 7.334 1 6 2.703 6 5.6V6h2v-.801C8 3.754 8.797 3 10 3c1.203 0 2 .754 2 2.199V8H4c-.553 0-1 .646-1 1.199V17c0 .549.428 1.139.951 1.307l1.197.387C5.672 18.861 6.55 19 7.1 19h5.8c.549 0 1.428-.139 1.951-.307l1.196-.387c.524-.167.953-.757.953-1.306V9.199C17 8.646 16.352 8 15.8 8z&quot;&gt;&lt;/path&gt;
+            &lt;/symbol&gt;
+
+            &lt;symbol viewBox=&quot;0 0 20 20&quot; id=&quot;locked&quot;&gt;
+                &lt;path d=&quot;M15.8 8H14V5.6C14 2.703 12.665 1 10 1 7.334 1 6 2.703 6 5.6V8H4c-.553 0-1 .646-1 1.199V17c0 .549.428 1.139.951 1.307l1.197.387C5.672 18.861 6.55 19 7.1 19h5.8c.549 0 1.428-.139 1.951-.307l1.196-.387c.524-.167.953-.757.953-1.306V9.199C17 8.646 16.352 8 15.8 8zM12 8H8V5.199C8 3.754 8.797 3 10 3c1.203 0 2 .754 2 2.199V8z&quot;
+                /&gt;
+            &lt;/symbol&gt;
+
+            &lt;symbol viewBox=&quot;0 0 20 20&quot; id=&quot;close&quot;&gt;
+                &lt;path d=&quot;M14.348 14.849c-.469.469-1.229.469-1.697 0L10 11.819l-2.651 3.029c-.469.469-1.229.469-1.697 0-.469-.469-.469-1.229 0-1.697l2.758-3.15-2.759-3.152c-.469-.469-.469-1.228 0-1.697.469-.469 1.228-.469 1.697 0L10 8.183l2.651-3.031c.469-.469 1.228-.469 1.697 0 .469.469.469 1.229 0 1.697l-2.758 3.152 2.758 3.15c.469.469.469 1.229 0 1.698z&quot;
+                /&gt;
+            &lt;/symbol&gt;
+
+            &lt;symbol viewBox=&quot;0 0 20 20&quot; id=&quot;large-arrow&quot;&gt;
+                &lt;path d=&quot;M13.25 10L6.109 2.58c-.268-.27-.268-.707 0-.979.268-.27.701-.27.969 0l7.83 7.908c.268.271.268.709 0 .979l-7.83 7.908c-.268.271-.701.27-.969 0-.268-.269-.268-.707 0-.979L13.25 10z&quot;
+                /&gt;
+            &lt;/symbol&gt;
+
+            &lt;symbol viewBox=&quot;0 0 20 20&quot; id=&quot;large-arrow-down&quot;&gt;
+                &lt;path d=&quot;M17.418 6.109c.272-.268.709-.268.979 0s.271.701 0 .969l-7.908 7.83c-.27.268-.707.268-.979 0l-7.908-7.83c-.27-.268-.27-.701 0-.969.271-.268.709-.268.979 0L10 13.25l7.418-7.141z&quot;
+                /&gt;
+            &lt;/symbol&gt;
+
+
+            &lt;symbol viewBox=&quot;0 0 24 24&quot; id=&quot;jump-to&quot;&gt;
+                &lt;path d=&quot;M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z&quot; /&gt;
+            &lt;/symbol&gt;
+
+            &lt;symbol viewBox=&quot;0 0 24 24&quot; id=&quot;expand&quot;&gt;
+                &lt;path d=&quot;M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z&quot; /&gt;
+            &lt;/symbol&gt;
+
+        &lt;/defs&gt;
+    &lt;/svg&gt;
+
+
+    &lt;div id=&quot;swagger-ui&quot;&gt;
+        &lt;div data-reactroot=&quot;&quot; class=&quot;swagger-ui&quot;&gt;
+            &lt;div&gt;
+                &lt;div class=&quot;information-container wrapper&quot;&gt;
+                    &lt;section class=&quot;block col-12&quot;&gt;
+                        &lt;div class=&quot;info&quot;&gt;
+                            &lt;hgroup class=&quot;main&quot;&gt;
+                                &lt;h2 class=&quot;title&quot;&gt;httpbin.org
+                                    &lt;small&gt;
+                                        &lt;pre class=&quot;version&quot;&gt;0.9.2&lt;/pre&gt;
+                                    &lt;/small&gt;
+                                &lt;/h2&gt;
+                                &lt;pre class=&quot;base-url&quot;&gt;[ Base URL: httpbin.org/ ]&lt;/pre&gt;
+                            &lt;/hgroup&gt;
+                            &lt;div class=&quot;description&quot;&gt;
+                                &lt;div class=&quot;markdown&quot;&gt;
+                                    &lt;p&gt;A simple HTTP Request &amp;amp; Response Service.
+                                        &lt;br&gt;
+                                        &lt;br&gt;
+                                        &lt;b&gt;Run locally: &lt;/b&gt;
+                                        &lt;code&gt;$ docker run -p 80:80 kennethreitz/httpbin&lt;/code&gt;
+                                    &lt;/p&gt;
+                                &lt;/div&gt;
+                            &lt;/div&gt;
+                            &lt;div&gt;
+                                &lt;div&gt;
+                                    &lt;a href=&quot;https://kennethreitz.org&quot; target=&quot;_blank&quot;&gt;the developer - Website&lt;/a&gt;
+                                &lt;/div&gt;
+                                &lt;a href=&quot;mailto:me@kennethreitz.org&quot;&gt;Send email to the developer&lt;/a&gt;
+                            &lt;/div&gt;
+                        &lt;/div&gt;
+                        &lt;!-- ADDS THE LOADER SPINNER --&gt;
+                        &lt;div class=&quot;loading-container&quot;&gt;
+                            &lt;div class=&quot;loading&quot;&gt;&lt;/div&gt;
+                        &lt;/div&gt;
+
+                    &lt;/section&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+
+
+    &lt;div class=&#x27;swagger-ui&#x27;&gt;
+        &lt;div class=&quot;wrapper&quot;&gt;
+            &lt;section class=&quot;clear&quot;&gt;
+                &lt;span style=&quot;float: right;&quot;&gt;
+                    [Powered by
+                    &lt;a target=&quot;_blank&quot; href=&quot;https://github.com/rochacbruno/flasgger&quot;&gt;Flasgger&lt;/a&gt;]
+                    &lt;br&gt;
+                &lt;/span&gt;
+            &lt;/section&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+
+
+
+    &lt;script src=&quot;/flasgger_static/swagger-ui-bundle.js&quot;&gt; &lt;/script&gt;
+    &lt;script src=&quot;/flasgger_static/swagger-ui-standalone-preset.js&quot;&gt; &lt;/script&gt;
+    &lt;script src=&#x27;/flasgger_static/lib/jquery.min.js&#x27; type=&#x27;text/javascript&#x27;&gt;&lt;/script&gt;
+    &lt;script&gt;
+
+        window.onload = function () {
+            
+
+            fetch(&quot;/spec.json&quot;)
+                .then(function (response) {
+                    response.json()
+                        .then(function (json) {
+                            var current_protocol = window.location.protocol.slice(0, -1);
+                            if (json.schemes[0] != current_protocol) {
+                                // Switches scheme to the current in use
+                                var other_protocol = json.schemes[0];
+                                json.schemes[0] = current_protocol;
+                                json.schemes[1] = other_protocol;
+
+                            }
+                            json.host = window.location.host;  // sets the current host
+
+                            const ui = SwaggerUIBundle({
+                                spec: json,
+                                validatorUrl: null,
+                                dom_id: &#x27;#swagger-ui&#x27;,
+                                deepLinking: true,
+                                jsonEditor: true,
+                                docExpansion: &quot;none&quot;,
+                                apisSorter: &quot;alpha&quot;,
+                                //operationsSorter: &quot;alpha&quot;,
+                                presets: [
+                                    SwaggerUIBundle.presets.apis,
+                                    // yay ES6 modules ↘
+                                    Array.isArray(SwaggerUIStandalonePreset) ? SwaggerUIStandalonePreset : SwaggerUIStandalonePreset.default
+                                ],
+                                plugins: [
+                                    SwaggerUIBundle.plugins.DownloadUrl
+                                ],
+            
+            // layout: &quot;StandaloneLayout&quot;  // uncomment to enable the green top header
+        })
+
+        window.ui = ui
+
+        // uncomment to rename the top brand if layout is enabled
+        // $(&quot;.topbar-wrapper .link span&quot;).replaceWith(&quot;&lt;span&gt;httpbin&lt;/span&gt;&quot;);
+        })
+    })
+}
+    &lt;/script&gt;  &lt;div class=&#x27;swagger-ui&#x27;&gt;
+    &lt;div class=&quot;wrapper&quot;&gt;
+        &lt;section class=&quot;block col-12 block-desktop col-12-desktop&quot;&gt;
+            &lt;div&gt;
+
+                &lt;h2&gt;Other Utilities&lt;/h2&gt;
+
+                &lt;ul&gt;
+                    &lt;li&gt;
+                        &lt;a href=&quot;/forms/post&quot;&gt;HTML form&lt;/a&gt; that posts to /post /forms/post&lt;/li&gt;
+                &lt;/ul&gt;
+
+                &lt;br /&gt;
+                &lt;br /&gt;
+            &lt;/div&gt;
+        &lt;/section&gt;
+    &lt;/div&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+
+&lt;/html&gt;</pre></details></td><td class='error'></td></tr>
+</table>
+</body>
+</html>
