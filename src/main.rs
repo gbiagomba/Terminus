@@ -34,6 +34,7 @@ enum OutputFormat {
     Json,
     Html,
     Csv,
+    Sqlite,
     All,
 }
 
@@ -47,6 +48,7 @@ impl FromStr for OutputFormat {
             "json" => Ok(OutputFormat::Json),
             "html" => Ok(OutputFormat::Html),
             "csv" => Ok(OutputFormat::Csv),
+            "sqlite" | "db" => Ok(OutputFormat::Sqlite),
             "all" => Ok(OutputFormat::All),
             _ => Err(format!("Invalid output format: {}", s)),
         }
@@ -182,7 +184,7 @@ impl RateLimiter {
 
 fn main() -> Result<()> {
     let matches = Command::new("Terminus")
-        .version("2.10.2")
+        .disable_version_flag(true)
         .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
@@ -193,7 +195,7 @@ fn main() -> Result<()> {
         .arg(Arg::new("verbose").short('v').long("verbose").help("Enable verbose output with response headers").action(ArgAction::SetTrue))
         .arg(Arg::new("follow").short('L').long("follow").help("Follow HTTP redirects").action(ArgAction::SetTrue))
         .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name (extension added based on format)"))
-        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, all (default: stdout)"))
+        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, sqlite/db, all (default: stdout)"))
         .arg(Arg::new("filter").short('F').long("filter-code").value_name("STATUS_CODE").help("Filter results by HTTP status code"))
         .arg(Arg::new("proxy").short('x').long("proxy").value_name("PROXY").help("Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)"))
         .arg(Arg::new("header").short('H').long("header").value_name("HEADER").action(ArgAction::Append).help("Add custom header (format: 'Name: Value'). Can be specified multiple times"))
@@ -645,6 +647,47 @@ fn main() -> Result<()> {
                         };
 
                         if should_add {
+                            // Print real-time output if verbose and stdout format
+                            if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
+                                // Collect vulnerability indicators for display
+                                let temp_result = ScanResult {
+                                    url: url.clone(),
+                                    method: method.clone(),
+                                    status: status.as_u16(),
+                                    port: *port,
+                                    headers: headers_str.clone(),
+                                    error: None,
+                                    body_preview: body_preview.clone(),
+                                    matched_patterns: matched_patterns.clone(),
+                                    extracted_links: extracted_links.clone(),
+                                    security_headers: security_headers.clone(),
+                                    detected_errors: detected_errors.clone(),
+                                    reflection_detected,
+                                    http2_desync: http2_desync.clone(),
+                                    host_injection: host_injection.clone(),
+                                    xff_bypass: xff_bypass.clone(),
+                                    csrf_result: csrf_result.clone(),
+                                    ssrf_result: ssrf_result.clone(),
+                                    request_headers: Some(request_headers_str.clone()),
+                                    response_body: response_body.clone(),
+                                };
+
+                                let vuln_indicators = collect_vuln_indicators(&temp_result);
+                                let indicators_str = if !vuln_indicators.is_empty() {
+                                    format!(" {}", vuln_indicators.join(" "))
+                                } else {
+                                    String::new()
+                                };
+
+                                if let Some(ref headers) = headers_str {
+                                    println!("URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}{}",
+                                        url, method, status.as_u16(), port, headers, indicators_str);
+                                } else {
+                                    println!("URL: {}, Method: {}, Status: {}, Port: {}{}",
+                                        url, method, status.as_u16(), port, indicators_str);
+                                }
+                            }
+
                             if let Ok(mut results_guard) = results.lock() {
                                 results_guard.push(ScanResult {
                                     url: url.clone(),
@@ -753,6 +796,11 @@ fn main() -> Result<()> {
                         }
                     }
                     Err(e) => {
+                        // Print error in real-time if verbose
+                        if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
+                            eprintln!("Error on {}:{} using {}: {}", url, port, method, e);
+                        }
+
                         if let Ok(mut results_guard) = results.lock() {
                             results_guard.push(ScanResult {
                                 url: url.clone(),
@@ -1044,17 +1092,27 @@ fn extract_pd_urls(json: &JsonValue, urls: &mut HashSet<String>, ipv6_enabled: b
 
 fn output_results(results: &[ScanResult], format: OutputFormat, output_base: Option<&str>, verbose: bool) -> Result<()> {
     match format {
-        OutputFormat::Stdout => output_stdout(results, verbose),
+        OutputFormat::Stdout => {
+            // Skip stdout if verbose mode (already printed in real-time)
+            if !verbose {
+                output_stdout(results, verbose);
+            }
+        }
         OutputFormat::Txt => output_txt(results, output_base, verbose)?,
         OutputFormat::Json => output_json(results, output_base)?,
         OutputFormat::Html => output_html(results, output_base)?,
         OutputFormat::Csv => output_csv(results, output_base, verbose)?,
+        OutputFormat::Sqlite => output_sqlite(results, output_base)?,
         OutputFormat::All => {
-            output_stdout(results, verbose);
+            // Skip stdout if verbose mode (already printed in real-time)
+            if !verbose {
+                output_stdout(results, verbose);
+            }
             output_txt(results, output_base, verbose)?;
             output_json(results, output_base)?;
             output_html(results, output_base)?;
             output_csv(results, output_base, verbose)?;
+            output_sqlite(results, output_base)?;
         }
     }
     Ok(())
@@ -1266,8 +1324,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str(".filters{background:#fff;padding:15px;border-radius:8px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.1);}\n");
     html.push_str(".filter-group{display:inline-block;margin-right:15px;margin-bottom:10px;}\n");
     html.push_str(".filter-group label{margin-left:5px;}\n");
-    html.push_str("table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.1);}\n");
-    html.push_str("th,td{border:1px solid #ddd;padding:12px;text-align:left;}\n");
+    html.push_str("table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,0.1);table-layout:fixed;}\n");
+    html.push_str("th,td{border:1px solid #ddd;padding:12px;text-align:left;max-width:300px;word-break:break-word;overflow-wrap:break-word;}\n");
     html.push_str("th{background-color:#4CAF50;color:white;position:sticky;top:0;}\n");
     html.push_str("tr:nth-child(even){background-color:#f8f9fa;}\n");
     html.push_str("tr:hover{background-color:#e8f5e9;}\n");
@@ -1275,6 +1333,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str(".vuln-badge{display:inline-block;background:#e74c3c;color:white;padding:4px 8px;border-radius:4px;font-size:11px;margin:2px;}\n");
     html.push_str(".vuln-badge.security{background:#f39c12;}\n");
     html.push_str(".hidden{display:none;}\n");
+    html.push_str("td:first-child{max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}\n");
+    html.push_str("td:first-child:hover{white-space:normal;overflow:visible;}\n");
     html.push_str("</style>\n");
 
     // JavaScript for filtering
@@ -1420,7 +1480,12 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         html.push_str(&format!("<td>{}</td>", html_escape(&result.url)));
         html.push_str(&format!("<td>{}</td>", html_escape(&result.method)));
         html.push_str(&format!("<td>{}</td>", result.status));
-        html.push_str(&format!("<td>{}</td>", result.port));
+        let port_display = if result.port == 0 {
+            "N/A".to_string()
+        } else {
+            result.port.to_string()
+        };
+        html.push_str(&format!("<td>{}</td>", port_display));
         html.push_str(&format!("<td>{}</td>", vuln_display));
 
         // Add request headers in expandable details
@@ -1473,8 +1538,12 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
     let filename = format!("{}.csv", output_base.unwrap_or("terminus_results"));
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
 
-    // Write CSV header - always include all columns
-    writeln!(file, "URL,Method,Status,Port,Response Headers,Vulnerabilities,Request Headers,Response Body,Error")?;
+    // Write CSV header - response headers only in verbose mode
+    if verbose {
+        writeln!(file, "URL,Method,Status,Port,Response Headers,Vulnerabilities,Request Headers,Error")?;
+    } else {
+        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Request Headers,Error")?;
+    }
 
     // Write CSV rows
     for result in results {
@@ -1488,10 +1557,13 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
 
         let request_headers = csv_escape(result.request_headers.as_deref().unwrap_or(""));
-        let response_headers = csv_escape(result.headers.as_deref().unwrap_or(""));
-        let response_body = csv_escape(result.response_body.as_deref().unwrap_or(""));
 
-        writeln!(file, "{},{},{},{},{},{},{},{},{}", url, method, status, port, response_headers, vulnerabilities, request_headers, response_body, error)?;
+        if verbose {
+            let response_headers = csv_escape(result.headers.as_deref().unwrap_or(""));
+            writeln!(file, "{},{},{},{},{},{},{},{}", url, method, status, port, response_headers, vulnerabilities, request_headers, error)?;
+        } else {
+            writeln!(file, "{},{},{},{},{},{},{}", url, method, status, port, vulnerabilities, request_headers, error)?;
+        }
     }
 
     eprintln!("Results written to {}", filename);
@@ -1499,11 +1571,199 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
 }
 
 fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
+    // Remove problematic control characters
+    let cleaned = s
+        .replace('\r', "")           // Remove carriage returns
+        .replace('\n', " ")          // Replace newlines with spaces
+        .replace('\t', " ")          // Replace tabs with spaces
+        .replace('\0', "");          // Remove null bytes
+
+    // Quote if contains comma or double quote (RFC 4180)
+    if cleaned.contains(',') || cleaned.contains('"') {
+        format!("\"{}\"", cleaned.replace('"', "\"\""))
     } else {
-        s.to_string()
+        cleaned
     }
+}
+
+fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
+    use rusqlite::{Connection, params};
+
+    let filename = format!("{}.db", output_base.unwrap_or("terminus_results"));
+    let conn = Connection::open(&filename)
+        .context(format!("Failed to create SQLite database: {}", filename))?;
+
+    // Create table with denormalized schema
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS scan_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_timestamp TEXT NOT NULL,
+            url TEXT NOT NULL,
+            method TEXT NOT NULL,
+            status INTEGER NOT NULL,
+            port INTEGER NOT NULL,
+            headers TEXT,
+            error TEXT,
+            body_preview TEXT,
+            matched_patterns TEXT,
+            extracted_links TEXT,
+            request_headers TEXT,
+            response_body TEXT,
+            sec_headers_missing TEXT,
+            sec_headers_present TEXT,
+            sec_headers_issues TEXT,
+            detected_errors TEXT,
+            reflection_detected INTEGER DEFAULT 0,
+            http2_desync_detected INTEGER DEFAULT 0,
+            http2_http1_status INTEGER,
+            http2_http2_status INTEGER,
+            http2_status_mismatch INTEGER DEFAULT 0,
+            http2_response_diff TEXT,
+            http2_issues TEXT,
+            host_injection_suspected INTEGER DEFAULT 0,
+            host_reflected_in_location INTEGER DEFAULT 0,
+            host_reflected_in_vary INTEGER DEFAULT 0,
+            host_reflected_in_set_cookie INTEGER DEFAULT 0,
+            host_injected_host TEXT,
+            host_issues TEXT,
+            xff_bypass_suspected INTEGER DEFAULT 0,
+            xff_baseline_status INTEGER,
+            xff_xff_status INTEGER,
+            xff_status_changed INTEGER DEFAULT 0,
+            xff_response_diff TEXT,
+            xff_issues TEXT,
+            csrf_suspected INTEGER DEFAULT 0,
+            csrf_accepts_without_origin INTEGER DEFAULT 0,
+            csrf_accepts_with_fake_origin INTEGER DEFAULT 0,
+            csrf_missing_samesite INTEGER DEFAULT 0,
+            csrf_missing_x_frame_options INTEGER DEFAULT 0,
+            csrf_missing_csp INTEGER DEFAULT 0,
+            csrf_issues TEXT,
+            ssrf_suspected INTEGER DEFAULT 0,
+            ssrf_vulnerable_params TEXT,
+            ssrf_tested_payloads TEXT,
+            ssrf_response_indicators TEXT,
+            ssrf_issues TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    // Create indexes for common queries
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_url ON scan_results(url)", [])?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON scan_results(status)", [])?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_results(scan_timestamp)", [])?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vulnerabilities ON scan_results(http2_desync_detected, host_injection_suspected, xff_bypass_suspected, csrf_suspected, ssrf_suspected, reflection_detected)", [])?;
+
+    // Get current timestamp for this scan batch
+    let scan_timestamp = chrono::Utc::now().to_rfc3339();
+
+    // Insert results
+    for result in results {
+        // Helper to serialize Vec<String> to JSON
+        let to_json = |opt_vec: &Option<Vec<String>>| -> Option<String> {
+            opt_vec.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default())
+        };
+
+        // Extract security headers
+        let (sec_missing, sec_present, sec_issues) = result.security_headers.as_ref()
+            .map(|sh| (
+                to_json(&Some(sh.missing.clone())),
+                to_json(&Some(sh.present.clone())),
+                to_json(&Some(sh.issues.clone()))
+            ))
+            .unwrap_or((None, None, None));
+
+        // Extract HTTP/2 desync
+        let http2 = result.http2_desync.as_ref();
+
+        // Extract host injection
+        let host = result.host_injection.as_ref();
+
+        // Extract XFF bypass
+        let xff = result.xff_bypass.as_ref();
+
+        // Extract CSRF
+        let csrf = result.csrf_result.as_ref();
+
+        // Extract SSRF
+        let ssrf = result.ssrf_result.as_ref();
+
+        conn.execute(
+            "INSERT INTO scan_results (
+                scan_timestamp, url, method, status, port, headers, error, body_preview,
+                matched_patterns, extracted_links, request_headers, response_body,
+                sec_headers_missing, sec_headers_present, sec_headers_issues, detected_errors,
+                reflection_detected,
+                http2_desync_detected, http2_http1_status, http2_http2_status,
+                http2_status_mismatch, http2_response_diff, http2_issues,
+                host_injection_suspected, host_reflected_in_location, host_reflected_in_vary,
+                host_reflected_in_set_cookie, host_injected_host, host_issues,
+                xff_bypass_suspected, xff_baseline_status, xff_xff_status,
+                xff_status_changed, xff_response_diff, xff_issues,
+                csrf_suspected, csrf_accepts_without_origin, csrf_accepts_with_fake_origin,
+                csrf_missing_samesite, csrf_missing_x_frame_options, csrf_missing_csp, csrf_issues,
+                ssrf_suspected, ssrf_vulnerable_params, ssrf_tested_payloads,
+                ssrf_response_indicators, ssrf_issues
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47
+            )",
+            params![
+                scan_timestamp,
+                result.url,
+                result.method,
+                result.status,
+                result.port,
+                result.headers,
+                result.error,
+                result.body_preview,
+                to_json(&result.matched_patterns),
+                to_json(&result.extracted_links),
+                result.request_headers,
+                result.response_body,
+                sec_missing,
+                sec_present,
+                sec_issues,
+                to_json(&result.detected_errors),
+                result.reflection_detected.unwrap_or(false) as i32,
+                http2.map(|h| h.desync_detected as i32),
+                http2.map(|h| h.http1_status as i32),
+                http2.map(|h| h.http2_status as i32),
+                http2.map(|h| h.status_mismatch as i32),
+                http2.and_then(|h| h.response_diff.clone()),
+                http2.map(|h| serde_json::to_string(&h.issues).unwrap_or_default()),
+                host.map(|h| h.injection_suspected as i32),
+                host.map(|h| h.reflected_in_location as i32),
+                host.map(|h| h.reflected_in_vary as i32),
+                host.map(|h| h.reflected_in_set_cookie as i32),
+                host.map(|h| h.injected_host.clone()),
+                host.map(|h| serde_json::to_string(&h.issues).unwrap_or_default()),
+                xff.map(|x| x.bypass_suspected as i32),
+                xff.map(|x| x.baseline_status as i32),
+                xff.map(|x| x.xff_status as i32),
+                xff.map(|x| x.status_changed as i32),
+                xff.and_then(|x| x.response_diff.clone()),
+                xff.map(|x| serde_json::to_string(&x.issues).unwrap_or_default()),
+                csrf.map(|c| c.csrf_suspected as i32),
+                csrf.map(|c| c.accepts_without_origin as i32),
+                csrf.map(|c| c.accepts_with_fake_origin as i32),
+                csrf.map(|c| c.missing_samesite as i32),
+                csrf.map(|c| c.missing_x_frame_options as i32),
+                csrf.map(|c| c.missing_csp as i32),
+                csrf.map(|c| serde_json::to_string(&c.issues).unwrap_or_default()),
+                ssrf.map(|s| s.ssrf_suspected as i32),
+                ssrf.map(|s| serde_json::to_string(&s.vulnerable_params).unwrap_or_default()),
+                ssrf.map(|s| serde_json::to_string(&s.tested_payloads).unwrap_or_default()),
+                ssrf.map(|s| serde_json::to_string(&s.response_indicators).unwrap_or_default()),
+                ssrf.map(|s| serde_json::to_string(&s.issues).unwrap_or_default()),
+            ],
+        )?;
+    }
+
+    eprintln!("Results written to {} ({} records)", filename, results.len());
+    Ok(())
 }
 
 fn load_previous_scan(filename: &str) -> Result<Vec<ScanResult>> {
