@@ -19,6 +19,16 @@ Cargo.lock
 *.txt
 !requirements.txt
 terminus_results/
+output.txt
+test_output.html
+*.html
+!docs/*.html
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 
 # macOS files
 .DS_Store

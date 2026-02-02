@@ -50,16 +50,22 @@
 - **IPv4/IPv6 Support**: Native support for both IPv4 and IPv6 addresses with `-6` flag
 
 ### Output Options
-- **Multiple Output Formats**: stdout, txt, json, html, csv, or all formats simultaneously
+- **Multiple Output Formats**: stdout, txt, json, html, csv, sqlite, or all formats simultaneously
 - **Output Format Control**: Use `--output-format` to specify desired format(s)
 - **Custom Output Location**: Specify output file base name with `-o` flag
-- **Vulnerability Indicators**: All output formats (stdout, txt, csv, html) display detected vulnerabilities with clear indicators
+- **Vulnerability Indicators**: All output formats (stdout, txt, csv, html, sqlite) display detected vulnerabilities with clear indicators
 - **Enhanced HTML Reports**: Interactive HTML reports with:
   - Vulnerability summary dashboard with statistics
   - JavaScript-powered filtering by vulnerability type
   - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Security Issues, Error Messages)
   - Clean/Pass indicators for endpoints with no vulnerabilities
-- **CSV Export**: Generate CSV files with vulnerability columns for easy data analysis and import into spreadsheets
+- **CSV Export**: Generate streamlined CSV files optimized for spreadsheet applications (response bodies removed for better compatibility)
+- **SQLite Database Export**: Export to queryable SQLite database for advanced analysis:
+  - Denormalized schema with 50+ columns for all scan results and vulnerabilities
+  - Automatic indexing on URL, status, timestamps, and vulnerability flags
+  - Query results with standard SQL (e.g., `SELECT url FROM scan_results WHERE csrf_suspected = 1`)
+  - Supports both `sqlite` and `db` format names
+  - Full response bodies and headers preserved for deep analysis
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
@@ -135,15 +141,16 @@ Ensure Rust is installed on your system:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Clone and build the repository:
+**Option 1: Install directly from GitHub** (recommended):
 ```bash
-git clone https://github.com/your_github/terminus.git
-cd terminus
-cargo build --release
+cargo install --git https://github.com/gbiagomba/terminus.git
 ```
 
-Install the tool:
+**Option 2: Clone and build manually**:
 ```bash
+git clone https://github.com/gbiagomba/terminus.git
+cd terminus
+cargo build --release
 cargo install --path .
 ```
 
@@ -205,7 +212,7 @@ Options:
   -v, --verbose                    Enable verbose output with response headers
   -L, --follow                     Follow HTTP redirects
   -o, --output <FILE>              Output file base name (extension added based on format)
-      --output-format <FORMAT>     Output format: stdout, txt, json, html, csv, all (default: stdout)
+      --output-format <FORMAT>     Output format: stdout, txt, json, html, csv, sqlite/db, all (default: stdout)
   -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
   -x, --proxy <PROXY>              Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)
   -H, --header <HEADER>            Add custom header (format: 'Name: Value'). Can be specified multiple times
@@ -330,8 +337,31 @@ terminus -f urls.txt --output-format html -o scan_results
 terminus -f urls.txt --output-format csv -o scan_results
 ```
 
+**Output to SQLite database**:
+```bash
+# Basic SQLite export
+terminus -f urls.txt --output-format sqlite -o scan_results
+
+# Query the database with standard SQL
+sqlite3 scan_results.db "SELECT url, status, port FROM scan_results WHERE status >= 400;"
+
+# Find all endpoints with vulnerabilities
+sqlite3 scan_results.db "SELECT url, method FROM scan_results WHERE
+  http2_desync_detected = 1 OR
+  host_injection_suspected = 1 OR
+  csrf_suspected = 1 OR
+  ssrf_suspected = 1;"
+
+# Export specific columns to CSV from database
+sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results;" > filtered_results.csv
+
+# Can also use 'db' as format name
+terminus -f urls.txt --output-format db -o scan_results
+```
+
 **Output to all formats**:
 ```bash
+# Creates .txt, .json, .html, .csv, and .db files
 terminus -f urls.txt --output-format all -o scan_results
 ```
 
