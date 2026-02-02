@@ -141,15 +141,16 @@ Ensure Rust is installed on your system:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Clone and build the repository:
+**Option 1: Install directly from GitHub** (recommended):
 ```bash
-git clone https://github.com/your_github/terminus.git
-cd terminus
-cargo build --release
+cargo install --git https://github.com/gbiagomba/terminus.git
 ```
 
-Install the tool:
+**Option 2: Clone and build manually**:
 ```bash
+git clone https://github.com/gbiagomba/terminus.git
+cd terminus
+cargo build --release
 cargo install --path .
 ```
 

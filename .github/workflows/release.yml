@@ -9,8 +9,6 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.target }}
-    permissions:
-      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -73,8 +71,59 @@ jobs:
           cp "${{ matrix.binary_name }}" "${{ matrix.asset_name }}"
         fi
 
-    - name: Upload release binary
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
       with:
-        files: target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+        name: ${{ matrix.asset_name }}
+        path: target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release-files
+        find artifacts -type f -exec cp {} release-files/ \;
+        ls -la release-files/
+
+    - name: Get version from Cargo.toml
+      id: version
+      run: |
+        VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Create tagged release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-files/*
+        generate_release_notes: true
+
+    - name: Update latest release
+      if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: latest
+        name: Latest Build (v${{ steps.version.outputs.version }})
+        body: |
+          Automated build from the latest commit on main branch.
+
+          **Commit:** ${{ github.sha }}
+          **Version:** ${{ steps.version.outputs.version }}
+
+          > Note: This is a pre-release build. For stable releases, see the versioned tags.
+        prerelease: true
+        files: release-files/*
