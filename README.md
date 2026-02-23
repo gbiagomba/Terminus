@@ -16,6 +16,8 @@
   - [Passive Security Analysis](#passive-security-analysis-v260)
   - [HTTP/2 Desync Detection](#http2-desync-detection-v270)
   - [Advanced Passive Vulnerability Detection](#advanced-passive-vulnerability-detection-v280)
+  - [Arbitrary Method Fuzzing](#arbitrary-method-fuzzing-v2120)
+  - [Interactive SQLite Mode](#interactive-sqlite-mode-v2120)
 - [Installation](#installation)
   - [Using the Makefile](#using-the-makefile)
 - [Usage](#usage)
@@ -57,7 +59,7 @@
 - **Enhanced HTML Reports**: Interactive HTML reports with:
   - Vulnerability summary dashboard with statistics
   - JavaScript-powered filtering by vulnerability type
-  - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Security Issues, Error Messages)
+  - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Arbitrary Method Accepted, Method Confusion, Security Issues, Error Messages)
   - Clean/Pass indicators for endpoints with no vulnerabilities
 - **CSV Export**: Generate streamlined CSV files optimized for spreadsheet applications (response bodies removed for better compatibility)
 - **SQLite Database Export**: Export to queryable SQLite database for advanced analysis:
@@ -66,9 +68,12 @@
   - Query results with standard SQL (e.g., `SELECT url FROM scan_results WHERE csrf_suspected = 1`)
   - Supports both `sqlite` and `db` format names
   - Full response bodies and headers preserved for deep analysis
+  - Includes `arbitrary_method_used` column for fuzzed methods
+  - Optional interactive query shell via `--db-interactive`
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
+  - **Arbitrary Method Fuzzing**: Use `--fuzz-methods` with optional `--custom-method` / `--custom-methods-file` to test non-standard methods
 - **Smart Port Scanning**:
   - Default: Scans ports 80 and 443 when no `-p` flag is specified
   - Custom Ports: Specify comma-separated ports like `80,443,8080` with `-p` flag
@@ -117,6 +122,18 @@
 - **X-Forwarded-For Bypass Detection**: Detect IP-based access control bypasses by comparing baseline requests with X-Forwarded-For header modifications
 - **CSRF Vulnerability Detection**: Passively identify missing CSRF protections including Origin/Referer validation, SameSite cookies, X-Frame-Options, and CSP headers
 - **SSRF Vulnerability Detection**: Detect potential Server-Side Request Forgery (CWE-918) vulnerabilities by identifying suspicious URL parameters and response indicators
+
+### Arbitrary Method Fuzzing (v2.12.0)
+- **Fuzz HTTP Methods**: Test intentionally nonsensical methods to identify method confusion and unexpected acceptance
+- **Indicators**:
+  - `[Arbitrary Method Accepted]` when a non-standard method returns 2xx/3xx
+  - `[Method Confusion Suspected]` when response status differs from baseline GET
+- **Custom Methods**: Add methods via `--custom-method` or `--custom-methods-file`
+
+### Interactive SQLite Mode (v2.12.0)
+- **REPL for SQLite**: Use `--db-interactive <SQLITE_FILE>` to explore a Terminus DB without arbitrary SQL
+- **Safe Commands**: `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
+- **Pagination**: 20-row pages with `--more` support
 
 ### Performance & Usability Enhancements (v2.9.0)
 - **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution
@@ -236,6 +253,10 @@ Options:
       --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
       --scan-level <LEVEL>         Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)
   -t, --threads <NUM>              Number of concurrent threads for scanning (default: 10)
+      --fuzz-methods               Enable arbitrary HTTP method fuzzing
+      --custom-method <METHOD>     Add one or more arbitrary HTTP methods for fuzzing (can be specified multiple times)
+      --custom-methods-file <FILE> Load arbitrary HTTP methods from a file (one per line)
+      --db-interactive <SQLITE_FILE> Open an interactive shell for a Terminus SQLite database
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -357,6 +378,9 @@ sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results
 
 # Can also use 'db' as format name
 terminus -f urls.txt --output-format db -o scan_results
+
+# Interactive query shell
+terminus --db-interactive scan_results.db
 ```
 
 **Output to all formats**:
@@ -418,6 +442,37 @@ terminus -f urls.txt --scan-level standard --detect-host-injection -o custom_sca
 
 # Combine preset with other flags
 terminus -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
+```
+
+#### Arbitrary Method Fuzzing Examples (v2.12.0)
+
+**Fuzz predefined arbitrary methods**:
+```bash
+terminus -u https://example.com --fuzz-methods -k
+```
+
+**Add custom arbitrary methods**:
+```bash
+terminus -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-method SPLAT -k
+```
+
+**Load methods from file**:
+```bash
+terminus -u https://example.com --fuzz-methods --custom-methods-file methods.txt -k
+```
+
+#### Interactive SQLite Examples (v2.12.0)
+
+```bash
+terminus --db-interactive scan_results.db
+
+terminus> list urls
+terminus> find status 403
+terminus> find exploit csrf
+terminus> show scan 42
+terminus> show raw 42
+terminus> --more
+terminus> exit
 ```
 
 **Concurrent Scanning with Threading**:
@@ -932,6 +987,12 @@ PROPFIND, PROPPATCH, PUT, REPORT, RPC_IN_DATA, RPC_OUT_DATA,
 SEARCH, SUBSCRIBE, TRACE, UNCHECKOUT, UNLOCK, UNSUBSCRIBE,
 UPDATE, VERSION-CONTROL, X-MS-ENUMATTS
 ```
+
+When using `--fuzz-methods`, Terminus also includes arbitrary methods such as:
+```
+BILBAO, FOOBAR, CATS, TERMINUS, PUZZLE, HELLO
+```
+You can add more with `--custom-method` and `--custom-methods-file`.
 
 ---
 

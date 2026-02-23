@@ -5,7 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
-## [2.11.0] - 2026-01-28
+## [2.12.0] - 2026-02-23
+
+### Added
+- **Arbitrary HTTP Method Fuzzing**:
+  - New flags: `--fuzz-methods`, `--custom-method`, `--custom-methods-file`
+  - Predefined arbitrary methods: `BILBAO`, `FOOBAR`, `CATS`, `TERMINUS`, `PUZZLE`, `HELLO`
+  - Baseline GET comparison for method confusion detection
+  - New indicators: `[Arbitrary Method Accepted]`, `[Method Confusion Suspected]`
+- **Interactive SQLite Mode**:
+  - `--db-interactive <SQLITE_FILE>` REPL for safe database exploration
+  - Commands: `help`, `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`,
+    `show scan <ID>`, `show raw <ID>`, `--more`, `exit`
+  - Parameterized queries and 20-row pagination
+  - Friendly error for non-Terminus databases
+- **SQLite Schema Extension**:
+  - Added `arbitrary_method_used` column to `scan_results`
+
+### Changed
+- **Version**: Bumped from 2.11.0 to 2.12.0
+- **Outputs**: CSV and HTML include `arbitrary_method_used` where applicable
+
+### Examples
+```bash
+# Fuzz arbitrary methods
+terminus -u https://example.com --fuzz-methods -k
+
+# Add custom methods
+terminus -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-method SPLAT -k
+
+# SQLite interactive shell
+terminus --db-interactive scan_results.db
+```
 
 ### Added
 - **SQLite Database Export**: New `--output-format sqlite` option for queryable database export
@@ -415,3 +446,5 @@ python terminus_ai_analyzer.py results.json --provider ollama --persona security
 
 ### Fixed
 - Various bug fixes and improvements
+
+## [2.11.0] - 2026-01-28
