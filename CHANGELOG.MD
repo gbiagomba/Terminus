@@ -38,67 +38,6 @@ terminus -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-m
 terminus --db-interactive scan_results.db
 ```
 
-### Added
-- **SQLite Database Export**: New `--output-format sqlite` option for queryable database export
-  - Export scan results to SQLite database for SQL-based analysis
-  - Denormalized schema with 50+ columns covering all scan results and vulnerabilities
-  - Automatic indexing on URL, status, scan_timestamp, and vulnerability flags for fast queries
-  - Supports both `sqlite` and `db` format names
-  - Full response bodies and headers preserved for deep analysis
-  - Example: `sqlite3 results.db "SELECT url FROM scan_results WHERE csrf_suspected = 1;"`
-  - Compatible with all existing scan features and security checks
-  - Accessible via standard `sqlite3` CLI or any SQLite library
-  - Included in `--output-format all` mode
-
-### Fixed
-- **HTML Port Display**: Fixed port column showing "0" for URLs with embedded ports
-  - Port column now displays "N/A" when port is already part of the URL
-  - Normal port scanning (via `-p` flag) continues to show actual port numbers (80, 443, etc.)
-  - Improves clarity in HTML reports for mixed URL formats
-
-- **HTML Table Overflow**: Fixed table layout issues with long URLs and content
-  - Added CSS `max-width` constraints and `word-break` rules to prevent table overflow
-  - URLs now truncate with ellipsis (`...`) and show full text on hover
-  - Table uses fixed layout (`table-layout: fixed`) for consistent column widths
-  - Improved mobile and small screen responsiveness
-  - All table cells respect `max-width: 300px` with word wrapping
-
-- **CSV Export Improvements**: Simplified CSV format for better spreadsheet compatibility
-  - Removed full response bodies from CSV output (reduces file size by 90%+)
-  - Improved CSV escaping to handle all control characters (`\r`, `\n`, `\t`, `\0`)
-  - Better RFC 4180 compliance for Excel and Google Sheets
-  - CSV headers updated to reflect removed "Response Body" column
-  - Response bodies still available in JSON, HTML, and SQLite formats for detailed analysis
-
-### Changed
-- **Dependencies**:
-  - Added `rusqlite = { version = "0.32", features = ["bundled"] }` for SQLite support
-  - Added `chrono = "0.4"` for timestamp handling in database exports
-- **Version**: Bumped from 2.10.2 to 2.11.0 (minor version per Semantic Versioning)
-- **Output Formats**: Updated help text and documentation to include SQLite/DB format
-- **CSV Strategy**: CSV export now optimized for spreadsheet use; use JSON/SQLite for full data
-
-### Examples
-```bash
-# Export to SQLite database
-terminus -f urls.txt --output-format sqlite -o scan_results
-
-# Query the database
-sqlite3 scan_results.db "SELECT url, status FROM scan_results WHERE status >= 400;"
-
-# Find all vulnerable endpoints
-sqlite3 scan_results.db "SELECT url FROM scan_results WHERE
-  http2_desync_detected = 1 OR
-  host_injection_suspected = 1 OR
-  csrf_suspected = 1;"
-
-# Export to all formats including SQLite
-terminus -f targets.txt --output-format all -o comprehensive_scan
-
-# Filter and export specific columns from database to CSV
-sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results;" > filtered.csv
-```
-
 ## [2.8.0] - 2025-10-13
 
 ### Added
@@ -448,3 +387,64 @@ python terminus_ai_analyzer.py results.json --provider ollama --persona security
 - Various bug fixes and improvements
 
 ## [2.11.0] - 2026-01-28
+
+### Added
+- **SQLite Database Export**: New `--output-format sqlite` option for queryable database export
+  - Export scan results to SQLite database for SQL-based analysis
+  - Denormalized schema with 50+ columns covering all scan results and vulnerabilities
+  - Automatic indexing on URL, status, scan_timestamp, and vulnerability flags for fast queries
+  - Supports both `sqlite` and `db` format names
+  - Full response bodies and headers preserved for deep analysis
+  - Example: `sqlite3 results.db "SELECT url FROM scan_results WHERE csrf_suspected = 1;"`
+  - Compatible with all existing scan features and security checks
+  - Accessible via standard `sqlite3` CLI or any SQLite library
+  - Included in `--output-format all` mode
+
+### Fixed
+- **HTML Port Display**: Fixed port column showing "0" for URLs with embedded ports
+  - Port column now displays "N/A" when port is already part of the URL
+  - Normal port scanning (via `-p` flag) continues to show actual port numbers (80, 443, etc.)
+  - Improves clarity in HTML reports for mixed URL formats
+
+- **HTML Table Overflow**: Fixed table layout issues with long URLs and content
+  - Added CSS `max-width` constraints and `word-break` rules to prevent table overflow
+  - URLs now truncate with ellipsis (`...`) and show full text on hover
+  - Table uses fixed layout (`table-layout: fixed`) for consistent column widths
+  - Improved mobile and small screen responsiveness
+  - All table cells respect `max-width: 300px` with word wrapping
+
+- **CSV Export Improvements**: Simplified CSV format for better spreadsheet compatibility
+  - Removed full response bodies from CSV output (reduces file size by 90%+)
+  - Improved CSV escaping to handle all control characters (`\r`, `\n`, `\t`, `\0`)
+  - Better RFC 4180 compliance for Excel and Google Sheets
+  - CSV headers updated to reflect removed "Response Body" column
+  - Response bodies still available in JSON, HTML, and SQLite formats for detailed analysis
+
+### Changed
+- **Dependencies**:
+  - Added `rusqlite = { version = "0.32", features = ["bundled"] }` for SQLite support
+  - Added `chrono = "0.4"` for timestamp handling in database exports
+- **Version**: Bumped from 2.10.2 to 2.11.0 (minor version per Semantic Versioning)
+- **Output Formats**: Updated help text and documentation to include SQLite/DB format
+- **CSV Strategy**: CSV export now optimized for spreadsheet use; use JSON/SQLite for full data
+
+### Examples
+```bash
+# Export to SQLite database
+terminus -f urls.txt --output-format sqlite -o scan_results
+
+# Query the database
+sqlite3 scan_results.db "SELECT url, status FROM scan_results WHERE status >= 400;"
+
+# Find all vulnerable endpoints
+sqlite3 scan_results.db "SELECT url FROM scan_results WHERE
+  http2_desync_detected = 1 OR
+  host_injection_suspected = 1 OR
+  csrf_suspected = 1;"
+
+# Export to all formats including SQLite
+terminus -f targets.txt --output-format all -o comprehensive_scan
+
+# Filter and export specific columns from database to CSV
+sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results;" > filtered.csv
+```
