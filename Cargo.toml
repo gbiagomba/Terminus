@@ -1,6 +1,6 @@
 [package]
 name = "terminus"
-version = "2.11.0"
+version = "2.12.0"
 edition = "2021"
 description = "CLI tool for HTTP endpoint testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, smart diffing, multi-threading, and enhanced reporting."
 license = "GPL-3.0"

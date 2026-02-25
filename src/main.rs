@@ -26,6 +26,9 @@ const HTTP_METHODS: &[&str] = &[
     "SEARCH", "SUBSCRIBE", "TRACE", "TRACK", "UNBIND", "UNCHECKOUT", "UNLINK", "UNLOCK",
     "UNSUBSCRIBE", "UPDATE", "UPDATEREDIRECTREF", "VERSION-CONTROL", "X-MS-ENUMATTS"
 ];
+const ARBITRARY_HTTP_METHODS: &[&str] = &[
+    "BILBAO", "FOOBAR", "CATS", "TERMINUS", "PUZZLE", "HELLO"
+];
 
 #[derive(Debug, Clone, Copy)]
 enum OutputFormat {
@@ -59,6 +62,9 @@ impl FromStr for OutputFormat {
 struct ScanResult {
     url: String,
     method: String,
+    arbitrary_method_used: Option<String>,
+    arbitrary_method_accepted: Option<bool>,
+    method_confusion_suspected: Option<bool>,
     status: u16,
     port: u16,
     headers: Option<String>,
@@ -142,6 +148,12 @@ struct DiffResult {
     status_changes: Vec<(ScanResult, ScanResult)>, // (old, new)
 }
 
+struct PageState {
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+    index: usize,
+}
+
 struct RateLimiter {
     requests_per_second: f64,
     last_request: std::time::Instant,
@@ -189,6 +201,9 @@ fn main() -> Result<()> {
         .arg(Arg::new("url").short('u').long("url").value_name("URL").help("Specify a single URL/IP to check"))
         .arg(Arg::new("file").short('f').long("file").value_name("FILE").help("Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)"))
         .arg(Arg::new("method").short('X').long("method").value_name("METHOD").help("Specify the HTTP method to use (default: GET). Use ALL to test all methods"))
+        .arg(Arg::new("fuzz-methods").long("fuzz-methods").help("Enable arbitrary HTTP method fuzzing").action(ArgAction::SetTrue))
+        .arg(Arg::new("custom-method").long("custom-method").value_name("METHOD").action(ArgAction::Append).help("Add one or more arbitrary HTTP methods for fuzzing (can be specified multiple times)"))
+        .arg(Arg::new("custom-methods-file").long("custom-methods-file").value_name("FILE").help("Load arbitrary HTTP methods from a file (one per line)"))
         .arg(Arg::new("port").short('p').long("port").value_name("PORTS").help("Comma-separated ports to connect to (e.g., 80,443)").use_value_delimiter(true))
         .arg(Arg::new("ipv6").short('6').long("ipv6").help("Enable IPv6 scanning").action(ArgAction::SetTrue))
         .arg(Arg::new("insecure").short('k').long("insecure").help("Allow insecure SSL connections").action(ArgAction::SetTrue))
@@ -219,7 +234,13 @@ fn main() -> Result<()> {
         .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
         .arg(Arg::new("scan-level").long("scan-level").value_name("LEVEL").help("Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)"))
         .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("10").help("Number of concurrent threads for scanning"))
+        .arg(Arg::new("db-interactive").long("db-interactive").value_name("SQLITE_FILE").help("Open an interactive shell for a Terminus SQLite database"))
         .get_matches();
+
+    if let Some(db_path) = matches.get_one::<String>("db-interactive") {
+        run_db_interactive(db_path)?;
+        return Ok(());
+    }
 
     let verbose = matches.get_flag("verbose");
     let allow_insecure = matches.get_flag("insecure");
@@ -344,15 +365,63 @@ fn main() -> Result<()> {
         process::exit(1);
     };
 
-    let methods = if let Some(m) = matches.get_one::<String>("method") {
+    let fuzz_methods_enabled = matches.get_flag("fuzz-methods");
+    let mut methods_set: HashSet<String> = HashSet::new();
+    let mut arbitrary_methods: HashSet<String> = HashSet::new();
+
+    let standard_methods: HashSet<String> = HTTP_METHODS.iter().map(|m| m.to_string()).collect();
+
+    if let Some(m) = matches.get_one::<String>("method") {
         if m.eq_ignore_ascii_case("ALL") {
-            HTTP_METHODS.iter().map(|s| s.to_string()).collect()
+            for method in HTTP_METHODS {
+                methods_set.insert(method.to_string());
+            }
         } else {
-            vec![m.to_string()]
+            methods_set.insert(m.to_uppercase());
+            if !standard_methods.contains(&m.to_uppercase()) {
+                arbitrary_methods.insert(m.to_uppercase());
+            }
         }
     } else {
-        vec!["GET".to_string()]
-    };
+        methods_set.insert("GET".to_string());
+    }
+
+    if fuzz_methods_enabled {
+        for method in ARBITRARY_HTTP_METHODS {
+            methods_set.insert(method.to_string());
+            arbitrary_methods.insert(method.to_string());
+        }
+    }
+
+    if let Some(custom_methods) = matches.get_many::<String>("custom-method") {
+        for method in custom_methods {
+            let method_upper = method.to_uppercase();
+            methods_set.insert(method_upper.clone());
+            arbitrary_methods.insert(method_upper);
+        }
+    }
+
+    if let Some(custom_methods_file) = matches.get_one::<String>("custom-methods-file") {
+        match read_lines(custom_methods_file) {
+            Ok(lines) => {
+                for line in lines {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    let method_upper = trimmed.to_uppercase();
+                    methods_set.insert(method_upper.clone());
+                    arbitrary_methods.insert(method_upper);
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to read custom methods file: {}", e);
+            }
+        }
+    }
+
+    let mut methods: Vec<String> = methods_set.into_iter().collect();
+    methods.sort();
 
     let ports: Vec<u16> = matches
         .get_many::<String>("port")
@@ -434,8 +503,8 @@ fn main() -> Result<()> {
         }
     }
 
-    // Build scan tasks
-    let mut scan_tasks = Vec::new();
+    // Build scan targets
+    let mut scan_targets = Vec::new();
     for url in &urls {
         // Check if URL already has a port specified
         let has_port = url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':'));
@@ -461,16 +530,69 @@ fn main() -> Result<()> {
             vec![80, 443]
         };
 
-        for method in &methods {
-            for port in &test_ports {
-                scan_tasks.push((url.clone(), method.clone(), *port));
+        for port in &test_ports {
+            let full_url = build_full_url(url, *port);
+            scan_targets.push((url.clone(), *port, full_url));
+        }
+    }
+
+    // Baseline GET status for arbitrary method detection
+    let mut baseline_statuses = std::collections::HashMap::new();
+    if !arbitrary_methods.is_empty() {
+        let mut seen = HashSet::new();
+        for (_, _port, full_url) in &scan_targets {
+            if !seen.insert(full_url.clone()) {
+                continue;
+            }
+            // Apply rate limiting if configured
+            if let Ok(mut limiter_guard) = rate_limiter.lock() {
+                if let Some(ref mut limiter) = *limiter_guard {
+                    limiter.wait();
+                }
+            }
+
+            // Apply random delay if configured
+            if let Some((min, max)) = random_delay_range {
+                use rand::Rng;
+                let delay = rand::rng().random_range(min..=max);
+                std::thread::sleep(std::time::Duration::from_secs(delay));
+            }
+
+            let baseline_method = build_reqwest_method("GET");
+            let status = client.request(baseline_method, full_url)
+                .headers(custom_headers.clone())
+                .send()
+                .map(|resp| resp.status().as_u16())
+                .ok();
+
+            if let Some(code) = status {
+                baseline_statuses.insert(full_url.clone(), code);
+            } else {
+                baseline_statuses.insert(full_url.clone(), 0);
             }
         }
     }
 
+    let baseline_statuses = Arc::new(baseline_statuses);
+    let arbitrary_methods = Arc::new(arbitrary_methods);
+
+    // Build scan tasks
+    let mut scan_tasks = Vec::new();
+    for (url, port, full_url) in &scan_targets {
+        for method in &methods {
+            scan_tasks.push((url.clone(), method.clone(), *port, full_url.clone()));
+        }
+    }
+
     // Scan URLs in parallel
-    scan_tasks.par_iter().for_each(|(url, method, port)| {
-        let req_method = Method::from_str(method).unwrap_or(Method::GET);
+    scan_tasks.par_iter().for_each(|(url, method, port, full_url)| {
+        let req_method = build_reqwest_method(method);
+        let is_arbitrary_method = arbitrary_methods.contains(method);
+        let arbitrary_method_used = if is_arbitrary_method {
+            Some(method.clone())
+        } else {
+            None
+        };
 
         // Apply rate limiting if configured
         if let Ok(mut limiter_guard) = rate_limiter.lock() {
@@ -487,28 +609,10 @@ fn main() -> Result<()> {
         }
 
         // Only append port if URL doesn't already have one AND it's not a standard port
-        let full_url = if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
-            // URL already has a port, use it as-is
-            url.clone()
-        } else {
-            // Check if this is a standard port for the protocol
-            let is_https = url.starts_with("https://");
-            let is_http = url.starts_with("http://");
-            let is_standard_port = (is_https && *port == 443) || (is_http && *port == 80);
-
-            if is_standard_port {
-                // Don't append standard ports (80 for HTTP, 443 for HTTPS)
-                url.clone()
-            } else {
-                // Append non-standard port
-                format!("{}:{}", url, port)
-            }
-        };
-
         // Capture request headers for detailed output
         let request_headers_str = flatten_headers(&custom_headers);
 
-        match client.request(req_method.clone(), &full_url)
+        match client.request(req_method.clone(), full_url)
                     .headers(custom_headers.clone())
                     .send() {
                     Ok(resp) => {
@@ -516,6 +620,25 @@ fn main() -> Result<()> {
                         if let Some(filter) = filter_code {
                             if status != filter {
                                 return;
+                            }
+                        }
+
+                        let mut arbitrary_method_accepted = None;
+                        let mut method_confusion_suspected = None;
+
+                        if is_arbitrary_method {
+                            if status.is_success() || status.is_redirection() {
+                                arbitrary_method_accepted = Some(true);
+                            } else {
+                                arbitrary_method_accepted = Some(false);
+                            }
+
+                            if let Some(baseline) = baseline_statuses.get(full_url) {
+                                if *baseline != 0 && *baseline != status.as_u16() {
+                                    method_confusion_suspected = Some(true);
+                                } else {
+                                    method_confusion_suspected = Some(false);
+                                }
                             }
                         }
 
@@ -613,35 +736,35 @@ fn main() -> Result<()> {
                         // Perform HTTP/2 desync check if requested
                         let http2_desync = if http2_desync_check && full_url.starts_with("https") {
                             let proxy_url_opt = matches.get_one::<String>("proxy").map(|s| s.as_str());
-                            Some(perform_http2_desync_check(&client, &full_url, &req_method, &custom_headers, status.as_u16(), proxy_url_opt))
+                            Some(perform_http2_desync_check(&client, full_url, &req_method, &custom_headers, status.as_u16(), proxy_url_opt))
                         } else {
                             None
                         };
 
                         // Perform host injection check if requested
                         let host_injection = if detect_host_injection {
-                            Some(perform_host_injection_check(&client, &full_url, &req_method, &custom_headers))
+                            Some(perform_host_injection_check(&client, full_url, &req_method, &custom_headers))
                         } else {
                             None
                         };
 
                         // Perform X-Forwarded-For bypass check if requested
                         let xff_bypass = if detect_xff_bypass {
-                            Some(perform_xff_bypass_check(&client, &full_url, &req_method, &custom_headers, status.as_u16()))
+                            Some(perform_xff_bypass_check(&client, full_url, &req_method, &custom_headers, status.as_u16()))
                         } else {
                             None
                         };
 
                         // Perform CSRF check if requested
                         let csrf_result = if detect_csrf {
-                            Some(perform_csrf_check(&client, &full_url, &req_method, &custom_headers))
+                            Some(perform_csrf_check(&client, full_url, &req_method, &custom_headers))
                         } else {
                             None
                         };
 
                         // Perform SSRF check if requested
                         let ssrf_result = if detect_ssrf {
-                            Some(perform_ssrf_check(&client, &full_url, &req_method, &custom_headers))
+                            Some(perform_ssrf_check(&client, full_url, &req_method, &custom_headers))
                         } else {
                             None
                         };
@@ -655,6 +778,9 @@ fn main() -> Result<()> {
                                     method: method.clone(),
                                     status: status.as_u16(),
                                     port: *port,
+                                    arbitrary_method_used: arbitrary_method_used.clone(),
+                                    arbitrary_method_accepted,
+                                    method_confusion_suspected,
                                     headers: headers_str.clone(),
                                     error: None,
                                     body_preview: body_preview.clone(),
@@ -692,6 +818,9 @@ fn main() -> Result<()> {
                                 results_guard.push(ScanResult {
                                     url: url.clone(),
                                     method: method.clone(),
+                                    arbitrary_method_used: arbitrary_method_used.clone(),
+                                    arbitrary_method_accepted,
+                                    method_confusion_suspected,
                                     status: status.as_u16(),
                                     port: *port,
                                     headers: headers_str.clone(),
@@ -751,6 +880,9 @@ fn main() -> Result<()> {
                                                     results_guard.push(ScanResult {
                                                         url: redirect_url.clone(),
                                                         method: method.clone(),
+                                                        arbitrary_method_used: arbitrary_method_used.clone(),
+                                                        arbitrary_method_accepted,
+                                                        method_confusion_suspected,
                                                         status: redirect_status.as_u16(),
                                                         port: *port,
                                                         headers: redirect_headers_str,
@@ -805,6 +937,9 @@ fn main() -> Result<()> {
                             results_guard.push(ScanResult {
                                 url: url.clone(),
                                 method: method.clone(),
+                                arbitrary_method_used: arbitrary_method_used.clone(),
+                                arbitrary_method_accepted: None,
+                                method_confusion_suspected: None,
                                 status: 0,
                                 port: *port,
                                 headers: None,
@@ -850,6 +985,32 @@ fn flatten_headers(headers: &reqwest::header::HeaderMap) -> String {
         .map(|(k, v)| format!("{}:{}", k, v.to_str().unwrap_or("INVALID")))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn build_full_url(url: &str, port: u16) -> String {
+    if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
+        return url.to_string();
+    }
+
+    let is_https = url.starts_with("https://");
+    let is_http = url.starts_with("http://");
+    let is_standard_port = (is_https && port == 443) || (is_http && port == 80);
+
+    if is_standard_port {
+        url.to_string()
+    } else {
+        format!("{}:{}", url, port)
+    }
+}
+
+fn build_reqwest_method(method: &str) -> Method {
+    Method::from_bytes(method.as_bytes()).unwrap_or_else(|_| {
+        let sanitized: String = method
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        Method::from_bytes(sanitized.as_bytes()).unwrap_or(Method::GET)
+    })
 }
 
 fn read_lines<P: AsRef<Path>>(filename: P) -> Result<Vec<String>> {
@@ -1161,6 +1322,14 @@ fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
         indicators.push("[Reflection Detected]".to_string());
     }
 
+    if let Some(true) = result.arbitrary_method_accepted {
+        indicators.push("[Arbitrary Method Accepted]".to_string());
+    }
+
+    if let Some(true) = result.method_confusion_suspected {
+        indicators.push("[Method Confusion Suspected]".to_string());
+    }
+
     // Security Headers Issues - show detailed issues
     if let Some(ref sec_headers) = result.security_headers {
         if !sec_headers.issues.is_empty() {
@@ -1264,6 +1433,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     vuln_counts.insert("csrf", 0);
     vuln_counts.insert("ssrf", 0);
     vuln_counts.insert("reflection", 0);
+    vuln_counts.insert("arbitrary_method", 0);
+    vuln_counts.insert("method_confusion", 0);
     vuln_counts.insert("security_issues", 0);
     vuln_counts.insert("error_messages", 0);
 
@@ -1295,6 +1466,12 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         }
         if let Some(true) = result.reflection_detected {
             *vuln_counts.get_mut("reflection").unwrap() += 1;
+        }
+        if let Some(true) = result.arbitrary_method_accepted {
+            *vuln_counts.get_mut("arbitrary_method").unwrap() += 1;
+        }
+        if let Some(true) = result.method_confusion_suspected {
+            *vuln_counts.get_mut("method_confusion").unwrap() += 1;
         }
         if let Some(ref sec_headers) = result.security_headers {
             if !sec_headers.issues.is_empty() {
@@ -1347,6 +1524,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str("    csrf: document.getElementById('filter-csrf').checked,\n");
     html.push_str("    ssrf: document.getElementById('filter-ssrf').checked,\n");
     html.push_str("    reflection: document.getElementById('filter-reflection').checked,\n");
+    html.push_str("    arbitrary: document.getElementById('filter-arbitrary').checked,\n");
+    html.push_str("    confusion: document.getElementById('filter-confusion').checked,\n");
     html.push_str("    security: document.getElementById('filter-security').checked,\n");
     html.push_str("    errors: document.getElementById('filter-errors').checked,\n");
     html.push_str("    clean: document.getElementById('filter-clean').checked\n");
@@ -1363,6 +1542,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str("      (filters.csrf && vulns.includes('csrf')) ||\n");
     html.push_str("      (filters.ssrf && vulns.includes('ssrf')) ||\n");
     html.push_str("      (filters.reflection && vulns.includes('reflection')) ||\n");
+    html.push_str("      (filters.arbitrary && vulns.includes('arbitrary')) ||\n");
+    html.push_str("      (filters.confusion && vulns.includes('confusion')) ||\n");
     html.push_str("      (filters.security && vulns.includes('security')) ||\n");
     html.push_str("      (filters.errors && vulns.includes('errors')) ||\n");
     html.push_str("      (filters.clean && hasClean);\n");
@@ -1388,6 +1569,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>CSRF</div><div class='stat-value'>{}</div></div>\n", vuln_counts["csrf"]));
     html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>SSRF</div><div class='stat-value'>{}</div></div>\n", vuln_counts["ssrf"]));
     html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Reflection</div><div class='stat-value'>{}</div></div>\n", vuln_counts["reflection"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Arbitrary Method Accepted</div><div class='stat-value'>{}</div></div>\n", vuln_counts["arbitrary_method"]));
+    html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Method Confusion</div><div class='stat-value'>{}</div></div>\n", vuln_counts["method_confusion"]));
     html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Security Issues</div><div class='stat-value'>{}</div></div>\n", vuln_counts["security_issues"]));
     html.push_str(&format!("<div class='stat-card vuln'><div class='stat-label'>Error Messages</div><div class='stat-value'>{}</div></div>\n", vuln_counts["error_messages"]));
     html.push_str("</div>\n</div>\n");
@@ -1401,6 +1584,8 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-csrf' onchange='filterTable()'><label for='filter-csrf'>CSRF</label></div>\n");
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-ssrf' onchange='filterTable()'><label for='filter-ssrf'>SSRF</label></div>\n");
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-reflection' onchange='filterTable()'><label for='filter-reflection'>Reflection</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-arbitrary' onchange='filterTable()'><label for='filter-arbitrary'>Arbitrary Method Accepted</label></div>\n");
+    html.push_str("<div class='filter-group'><input type='checkbox' id='filter-confusion' onchange='filterTable()'><label for='filter-confusion'>Method Confusion</label></div>\n");
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-security' onchange='filterTable()'><label for='filter-security'>Security Issues</label></div>\n");
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-errors' onchange='filterTable()'><label for='filter-errors'>Error Messages</label></div>\n");
     html.push_str("<div class='filter-group'><input type='checkbox' id='filter-clean' onchange='filterTable()'><label for='filter-clean'>Clean (No Issues)</label></div>\n");
@@ -1408,7 +1593,7 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
 
     // Results table
     html.push_str("<table>\n");
-    html.push_str("<tr><th>URL</th><th>Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request</th><th>Response</th><th>Error</th></tr>\n");
+    html.push_str("<tr><th>URL</th><th>Method</th><th>Arbitrary Method</th><th>Status</th><th>Port</th><th>Vulnerabilities</th><th>Request</th><th>Response</th><th>Error</th></tr>\n");
 
     for result in results {
         let mut vuln_tags: Vec<String> = Vec::new();
@@ -1449,6 +1634,14 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
             vuln_tags.push("<span class='vuln-badge'>Reflection</span>".to_string());
             data_vulns.push("reflection");
         }
+        if let Some(true) = result.arbitrary_method_accepted {
+            vuln_tags.push("<span class='vuln-badge'>Arbitrary Method Accepted</span>".to_string());
+            data_vulns.push("arbitrary");
+        }
+        if let Some(true) = result.method_confusion_suspected {
+            vuln_tags.push("<span class='vuln-badge'>Method Confusion</span>".to_string());
+            data_vulns.push("confusion");
+        }
         if let Some(ref sec_headers) = result.security_headers {
             if !sec_headers.issues.is_empty() {
                 // Show detailed security issues instead of just count
@@ -1479,6 +1672,7 @@ fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> 
         html.push_str(&format!("<tr class='data-row' data-vulns='{}'>", data_vulns_str));
         html.push_str(&format!("<td>{}</td>", html_escape(&result.url)));
         html.push_str(&format!("<td>{}</td>", html_escape(&result.method)));
+        html.push_str(&format!("<td>{}</td>", html_escape(result.arbitrary_method_used.as_deref().unwrap_or(""))));
         html.push_str(&format!("<td>{}</td>", result.status));
         let port_display = if result.port == 0 {
             "N/A".to_string()
@@ -1540,9 +1734,9 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
 
     // Write CSV header - response headers only in verbose mode
     if verbose {
-        writeln!(file, "URL,Method,Status,Port,Response Headers,Vulnerabilities,Request Headers,Error")?;
+        writeln!(file, "URL,Method,Arbitrary Method,Status,Port,Response Headers,Vulnerabilities,Request Headers,Error")?;
     } else {
-        writeln!(file, "URL,Method,Status,Port,Vulnerabilities,Request Headers,Error")?;
+        writeln!(file, "URL,Method,Arbitrary Method,Status,Port,Vulnerabilities,Request Headers,Error")?;
     }
 
     // Write CSV rows
@@ -1552,6 +1746,7 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
         let status = result.status.to_string();
         let port = result.port.to_string();
         let error = csv_escape(result.error.as_deref().unwrap_or(""));
+        let arbitrary_method_used = csv_escape(result.arbitrary_method_used.as_deref().unwrap_or(""));
 
         let vuln_indicators = collect_vuln_indicators(result);
         let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
@@ -1560,9 +1755,9 @@ fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) 
 
         if verbose {
             let response_headers = csv_escape(result.headers.as_deref().unwrap_or(""));
-            writeln!(file, "{},{},{},{},{},{},{},{}", url, method, status, port, response_headers, vulnerabilities, request_headers, error)?;
+            writeln!(file, "{},{},{},{},{},{},{},{},{}", url, method, arbitrary_method_used, status, port, response_headers, vulnerabilities, request_headers, error)?;
         } else {
-            writeln!(file, "{},{},{},{},{},{},{}", url, method, status, port, vulnerabilities, request_headers, error)?;
+            writeln!(file, "{},{},{},{},{},{},{},{}", url, method, arbitrary_method_used, status, port, vulnerabilities, request_headers, error)?;
         }
     }
 
@@ -1586,6 +1781,30 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
+fn ensure_sqlite_schema(conn: &rusqlite::Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut has_arbitrary_method = false;
+
+    for col in columns {
+        if let Ok(name) = col {
+            if name == "arbitrary_method_used" {
+                has_arbitrary_method = true;
+                break;
+            }
+        }
+    }
+
+    if !has_arbitrary_method {
+        conn.execute(
+            "ALTER TABLE scan_results ADD COLUMN arbitrary_method_used TEXT",
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
 fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
     use rusqlite::{Connection, params};
 
@@ -1600,6 +1819,7 @@ fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()
             scan_timestamp TEXT NOT NULL,
             url TEXT NOT NULL,
             method TEXT NOT NULL,
+            arbitrary_method_used TEXT,
             status INTEGER NOT NULL,
             port INTEGER NOT NULL,
             headers TEXT,
@@ -1649,6 +1869,8 @@ fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()
         [],
     )?;
 
+    ensure_sqlite_schema(&conn)?;
+
     // Create indexes for common queries
     conn.execute("CREATE INDEX IF NOT EXISTS idx_url ON scan_results(url)", [])?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON scan_results(status)", [])?;
@@ -1691,7 +1913,7 @@ fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()
 
         conn.execute(
             "INSERT INTO scan_results (
-                scan_timestamp, url, method, status, port, headers, error, body_preview,
+                scan_timestamp, url, method, arbitrary_method_used, status, port, headers, error, body_preview,
                 matched_patterns, extracted_links, request_headers, response_body,
                 sec_headers_missing, sec_headers_present, sec_headers_issues, detected_errors,
                 reflection_detected,
@@ -1708,12 +1930,13 @@ fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47
+                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48
             )",
             params![
                 scan_timestamp,
                 result.url,
                 result.method,
+                result.arbitrary_method_used,
                 result.status,
                 result.port,
                 result.headers,
@@ -1764,6 +1987,405 @@ fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()
 
     eprintln!("Results written to {} ({} records)", filename, results.len());
     Ok(())
+}
+
+fn run_db_interactive(db_path: &str) -> Result<()> {
+    use rusqlite::{Connection, params};
+
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("Failed to open SQLite database: {}", db_path))?;
+
+    validate_terminus_db(&conn)?;
+
+    println!("Terminus SQLite interactive mode. Type 'help' for commands.");
+    let stdin = io::stdin();
+    let mut last_page: Option<PageState> = None;
+
+    loop {
+        print!("terminus> ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        if stdin.read_line(&mut input).is_err() {
+            break;
+        }
+        let line = input.trim();
+
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        if line.eq_ignore_ascii_case("help") {
+            println!("Available commands:");
+            println!("  help");
+            println!("  list urls");
+            println!("  list methods");
+            println!("  find status <CODE>");
+            println!("  find exploit <TYPE>");
+            println!("  show scan <ID>");
+            println!("  show raw <ID>");
+            println!("  --more");
+            println!("  exit");
+            println!();
+            println!("Exploit types:");
+            println!("  http2_desync, host_injection, xff_bypass, csrf, ssrf, reflection, arbitrary_method");
+            continue;
+        }
+
+        if line == "--more" {
+            if let Some(state) = last_page.as_mut() {
+                let has_more = print_next_page(state);
+                if !has_more {
+                    last_page = None;
+                }
+            } else {
+                println!("No more results.");
+            }
+            continue;
+        }
+
+        if line.eq_ignore_ascii_case("list urls") {
+            let mut stmt = conn.prepare("SELECT DISTINCT url FROM scan_results ORDER BY url")?;
+            let rows_iter = stmt.query_map([], |row| Ok(vec![row.get::<_, String>(0)?]))?;
+            let mut rows = Vec::new();
+            for row in rows_iter {
+                rows.push(row?);
+            }
+            last_page = Some(PageState { headers: vec!["url".to_string()], rows, index: 0 });
+            if let Some(state) = last_page.as_mut() {
+                let has_more = print_next_page(state);
+                if !has_more {
+                    last_page = None;
+                }
+            }
+            continue;
+        }
+
+        if line.eq_ignore_ascii_case("list methods") {
+            let mut stmt = conn.prepare("SELECT DISTINCT method FROM scan_results ORDER BY method")?;
+            let rows_iter = stmt.query_map([], |row| Ok(vec![row.get::<_, String>(0)?]))?;
+            let mut rows = Vec::new();
+            for row in rows_iter {
+                rows.push(row?);
+            }
+            last_page = Some(PageState { headers: vec!["method".to_string()], rows, index: 0 });
+            if let Some(state) = last_page.as_mut() {
+                let has_more = print_next_page(state);
+                if !has_more {
+                    last_page = None;
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("find status ") {
+            let code: u16 = match rest.trim().parse() {
+                Ok(c) => c,
+                Err(_) => {
+                    println!("Invalid status code.");
+                    continue;
+                }
+            };
+            let mut stmt = conn.prepare(
+                "SELECT id, url, method, status, port FROM scan_results WHERE status = ?1 ORDER BY id"
+            )?;
+            let rows_iter = stmt.query_map(params![code as i64], |row| {
+                Ok(vec![
+                    row.get::<_, i64>(0)?.to_string(),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?.to_string(),
+                    row.get::<_, i64>(4)?.to_string(),
+                ])
+            })?;
+            let mut rows = Vec::new();
+            for row in rows_iter {
+                rows.push(row?);
+            }
+            last_page = Some(PageState {
+                headers: vec!["id".to_string(), "url".to_string(), "method".to_string(), "status".to_string(), "port".to_string()],
+                rows,
+                index: 0
+            });
+            if let Some(state) = last_page.as_mut() {
+                let has_more = print_next_page(state);
+                if !has_more {
+                    last_page = None;
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("find exploit ") {
+            let exploit = rest.trim().to_lowercase();
+            let query = match exploit.as_str() {
+                "http2_desync" => ("SELECT id, url, method, status, port FROM scan_results WHERE http2_desync_detected = 1 ORDER BY id", false),
+                "host_injection" => ("SELECT id, url, method, status, port FROM scan_results WHERE host_injection_suspected = 1 ORDER BY id", false),
+                "xff_bypass" => ("SELECT id, url, method, status, port FROM scan_results WHERE xff_bypass_suspected = 1 ORDER BY id", false),
+                "csrf" => ("SELECT id, url, method, status, port FROM scan_results WHERE csrf_suspected = 1 ORDER BY id", false),
+                "ssrf" => ("SELECT id, url, method, status, port FROM scan_results WHERE ssrf_suspected = 1 ORDER BY id", false),
+                "reflection" => ("SELECT id, url, method, status, port FROM scan_results WHERE reflection_detected = 1 ORDER BY id", false),
+                "arbitrary_method" => ("SELECT id, url, method, status, port FROM scan_results WHERE arbitrary_method_used IS NOT NULL AND arbitrary_method_used <> '' ORDER BY id", false),
+                _ => {
+                    println!("Unknown exploit type: {}", exploit);
+                    continue;
+                }
+            }.0;
+
+            let mut stmt = conn.prepare(query)?;
+            let rows_iter = stmt.query_map([], |row| {
+                Ok(vec![
+                    row.get::<_, i64>(0)?.to_string(),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?.to_string(),
+                    row.get::<_, i64>(4)?.to_string(),
+                ])
+            })?;
+
+            let mut rows = Vec::new();
+            for row in rows_iter {
+                rows.push(row?);
+            }
+            last_page = Some(PageState {
+                headers: vec!["id".to_string(), "url".to_string(), "method".to_string(), "status".to_string(), "port".to_string()],
+                rows,
+                index: 0
+            });
+            if let Some(state) = last_page.as_mut() {
+                let has_more = print_next_page(state);
+                if !has_more {
+                    last_page = None;
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("show scan ") {
+            let id: i64 = match rest.trim().parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    println!("Invalid scan ID.");
+                    continue;
+                }
+            };
+
+            let mut stmt = conn.prepare(
+                "SELECT id, scan_timestamp, url, method, arbitrary_method_used, status, port, headers, error, body_preview,
+                        matched_patterns, extracted_links, request_headers, response_body,
+                        sec_headers_missing, sec_headers_present, sec_headers_issues, detected_errors,
+                        reflection_detected,
+                        http2_desync_detected, http2_http1_status, http2_http2_status, http2_status_mismatch, http2_response_diff, http2_issues,
+                        host_injection_suspected, host_reflected_in_location, host_reflected_in_vary, host_reflected_in_set_cookie, host_injected_host, host_issues,
+                        xff_bypass_suspected, xff_baseline_status, xff_xff_status, xff_status_changed, xff_response_diff, xff_issues,
+                        csrf_suspected, csrf_accepts_without_origin, csrf_accepts_with_fake_origin, csrf_missing_samesite, csrf_missing_x_frame_options, csrf_missing_csp, csrf_issues,
+                        ssrf_suspected, ssrf_vulnerable_params, ssrf_tested_payloads, ssrf_response_indicators, ssrf_issues, created_at
+                 FROM scan_results WHERE id = ?1"
+            )?;
+
+            let row_result = stmt.query_row(params![id], |row| {
+                let mut rows = Vec::new();
+                let fields = [
+                    "id","scan_timestamp","url","method","arbitrary_method_used","status","port","headers","error","body_preview",
+                    "matched_patterns","extracted_links","request_headers","response_body",
+                    "sec_headers_missing","sec_headers_present","sec_headers_issues","detected_errors",
+                    "reflection_detected",
+                    "http2_desync_detected","http2_http1_status","http2_http2_status","http2_status_mismatch","http2_response_diff","http2_issues",
+                    "host_injection_suspected","host_reflected_in_location","host_reflected_in_vary","host_reflected_in_set_cookie","host_injected_host","host_issues",
+                    "xff_bypass_suspected","xff_baseline_status","xff_xff_status","xff_status_changed","xff_response_diff","xff_issues",
+                    "csrf_suspected","csrf_accepts_without_origin","csrf_accepts_with_fake_origin","csrf_missing_samesite","csrf_missing_x_frame_options","csrf_missing_csp","csrf_issues",
+                    "ssrf_suspected","ssrf_vulnerable_params","ssrf_tested_payloads","ssrf_response_indicators","ssrf_issues","created_at"
+                ];
+
+                for (idx, field) in fields.iter().enumerate() {
+                    let value: rusqlite::types::Value = row.get(idx)?;
+                    let rendered = match value {
+                        rusqlite::types::Value::Null => String::new(),
+                        rusqlite::types::Value::Integer(i) => i.to_string(),
+                        rusqlite::types::Value::Real(f) => f.to_string(),
+                        rusqlite::types::Value::Text(t) => t,
+                        rusqlite::types::Value::Blob(_) => "<blob>".to_string(),
+                    };
+                    rows.push(vec![field.to_string(), rendered]);
+                }
+                Ok(rows)
+            });
+
+            match row_result {
+                Ok(rows) => {
+                    print_table(&vec!["field".to_string(), "value".to_string()], &rows);
+                }
+                Err(_) => {
+                    println!("Scan ID not found.");
+                }
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("show raw ") {
+            let id: i64 = match rest.trim().parse() {
+                Ok(v) => v,
+                Err(_) => {
+                    println!("Invalid scan ID.");
+                    continue;
+                }
+            };
+
+            let mut stmt = conn.prepare(
+                "SELECT request_headers, headers, response_body FROM scan_results WHERE id = ?1"
+            )?;
+            let row_result = stmt.query_row(params![id], |row| {
+                let req_headers: Option<String> = row.get(0)?;
+                let resp_headers: Option<String> = row.get(1)?;
+                let resp_body: Option<String> = row.get(2)?;
+                Ok((req_headers, resp_headers, resp_body))
+            });
+
+            match row_result {
+                Ok((req_headers, resp_headers, resp_body)) => {
+                    println!("Request Headers:");
+                    println!("{}", req_headers.unwrap_or_default());
+                    println!();
+                    println!("Response Headers:");
+                    println!("{}", resp_headers.unwrap_or_default());
+                    println!();
+                    println!("Response Body:");
+                    println!("{}", resp_body.unwrap_or_default());
+                }
+                Err(_) => {
+                    println!("Scan ID not found.");
+                }
+            }
+            continue;
+        }
+
+        println!("Unknown command. Type 'help' for available commands.");
+    }
+
+    Ok(())
+}
+
+fn validate_terminus_db(conn: &rusqlite::Connection) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='scan_results'"
+    )?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_none() {
+        anyhow::bail!("Not a Terminus SQLite database: missing scan_results table.");
+    }
+
+    let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
+    let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut col_set = HashSet::new();
+    for col in cols {
+        if let Ok(name) = col {
+            col_set.insert(name);
+        }
+    }
+
+    let required_columns = vec![
+        "id", "scan_timestamp", "url", "method", "arbitrary_method_used", "status", "port",
+        "headers", "error", "body_preview", "matched_patterns", "extracted_links", "request_headers",
+        "response_body", "sec_headers_missing", "sec_headers_present", "sec_headers_issues",
+        "detected_errors", "reflection_detected", "http2_desync_detected", "http2_http1_status",
+        "http2_http2_status", "http2_status_mismatch", "http2_response_diff", "http2_issues",
+        "host_injection_suspected", "host_reflected_in_location", "host_reflected_in_vary",
+        "host_reflected_in_set_cookie", "host_injected_host", "host_issues",
+        "xff_bypass_suspected", "xff_baseline_status", "xff_xff_status", "xff_status_changed",
+        "xff_response_diff", "xff_issues", "csrf_suspected", "csrf_accepts_without_origin",
+        "csrf_accepts_with_fake_origin", "csrf_missing_samesite", "csrf_missing_x_frame_options",
+        "csrf_missing_csp", "csrf_issues", "ssrf_suspected", "ssrf_vulnerable_params",
+        "ssrf_tested_payloads", "ssrf_response_indicators", "ssrf_issues", "created_at"
+    ];
+
+    for col in required_columns {
+        if !col_set.contains(col) {
+            anyhow::bail!("Not a Terminus SQLite database: missing column '{}'.", col);
+        }
+    }
+
+    Ok(())
+}
+
+fn print_next_page(state: &mut PageState) -> bool {
+    const PAGE_SIZE: usize = 20;
+    let end = std::cmp::min(state.index + PAGE_SIZE, state.rows.len());
+    let slice = &state.rows[state.index..end];
+    print_table(&state.headers, slice);
+    state.index = end;
+    if state.index < state.rows.len() {
+        println!("--more");
+        true
+    } else {
+        false
+    }
+}
+
+fn print_table(headers: &[String], rows: &[Vec<String>]) {
+    if headers.is_empty() {
+        return;
+    }
+
+    let max_width: usize = 60;
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len().min(max_width)).collect();
+
+    for row in rows {
+        for (idx, cell) in row.iter().enumerate() {
+            let len = cell.chars().count();
+            let capped = if len > max_width { max_width } else { len };
+            if let Some(w) = widths.get_mut(idx) {
+                if capped > *w {
+                    *w = capped;
+                }
+            }
+        }
+    }
+
+    let mut header_line = String::new();
+    for (idx, header) in headers.iter().enumerate() {
+        let cell = truncate_cell(header, widths[idx]);
+        header_line.push_str(&format!("{:<width$}", cell, width = widths[idx]));
+        if idx + 1 < headers.len() {
+            header_line.push_str(" | ");
+        }
+    }
+    println!("{}", header_line);
+
+    let mut separator = String::new();
+    for (idx, width) in widths.iter().enumerate() {
+        separator.push_str(&"-".repeat(*width));
+        if idx + 1 < widths.len() {
+            separator.push_str("-+-");
+        }
+    }
+    println!("{}", separator);
+
+    for row in rows {
+        let mut line = String::new();
+        for (idx, cell) in row.iter().enumerate() {
+            let cell = truncate_cell(cell, widths[idx]);
+            line.push_str(&format!("{:<width$}", cell, width = widths[idx]));
+            if idx + 1 < headers.len() {
+                line.push_str(" | ");
+            }
+        }
+        println!("{}", line);
+    }
+}
+
+fn truncate_cell(s: &str, max_width: usize) -> String {
+    let len = s.chars().count();
+    if len <= max_width {
+        return s.to_string();
+    }
+    if max_width <= 3 {
+        return s.chars().take(max_width).collect();
+    }
+    let truncated: String = s.chars().take(max_width - 3).collect();
+    format!("{}...", truncated)
 }
 
 fn load_previous_scan(filename: &str) -> Result<Vec<ScanResult>> {
