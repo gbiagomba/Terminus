@@ -35,6 +35,12 @@ test_output.html
 .AppleDouble
 .LSOverride
 
+# Claude agents (local only)
+.claude/agents/
+
+# Local development tracking (not for version control)
+.version-tracking.md
+
 # IDE files
 .vscode/
 .idea/
