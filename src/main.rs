@@ -553,7 +553,7 @@ fn main() -> Result<()> {
 
             // Apply random delay if configured
             if let Some((min, max)) = random_delay_range {
-                use rand::Rng;
+                use rand::RngExt;
                 let delay = rand::rng().random_range(min..=max);
                 std::thread::sleep(std::time::Duration::from_secs(delay));
             }
@@ -603,7 +603,7 @@ fn main() -> Result<()> {
 
         // Apply random delay if configured
         if let Some((min, max)) = random_delay_range {
-            use rand::Rng;
+            use rand::RngExt;
             let delay = rand::rng().random_range(min..=max);
             std::thread::sleep(std::time::Duration::from_secs(delay));
         }
