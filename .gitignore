@@ -38,6 +38,9 @@ test_output.html
 # Claude agents (local only)
 .claude/agents/
 
+# Local development tracking (not for version control)
+.version-tracking.md
+
 # IDE files
 .vscode/
 .idea/
