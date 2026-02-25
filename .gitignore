@@ -35,6 +35,9 @@ test_output.html
 .AppleDouble
 .LSOverride
 
+# Claude agents (local only)
+.claude/agents/
+
 # IDE files
 .vscode/
 .idea/
