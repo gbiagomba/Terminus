@@ -18,6 +18,7 @@
   - [Advanced Passive Vulnerability Detection](#advanced-passive-vulnerability-detection-v280)
   - [Arbitrary Method Fuzzing](#arbitrary-method-fuzzing-v2120)
   - [Interactive SQLite Mode](#interactive-sqlite-mode-v2120)
+  - [JavaScript Redirect Following](#javascript-redirect-following-v2130)
 - [Installation](#installation)
   - [Using the Makefile](#using-the-makefile)
 - [Usage](#usage)
@@ -90,6 +91,7 @@
 - **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
 - **TLS/SSL Options**: Allow insecure connections with `-k` flag
 - **Redirect Handling**: Follow redirects with `-L` flag
+  - Follows standard HTTP `Location` redirects and common JavaScript-triggered redirects such as `window.location`, `location.href`, `location.assign()`, and `location.replace()`
 - **Verbose Output**: View detailed response headers with `-v` flag
 - **Scan Level Presets**: Predefined security scan configurations with `--scan-level` flag:
   - `quick`: Basic HTTP requests only (default behavior)
@@ -134,6 +136,11 @@
 - **REPL for SQLite**: Use `--db-interactive <SQLITE_FILE>` to explore a Terminus DB without arbitrary SQL
 - **Safe Commands**: `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
 - **Pagination**: 20-row pages with `--more` support
+
+### JavaScript Redirect Following (v2.13.0)
+- **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies
+- **Supported Patterns**: `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
+- **Relative URL Resolution**: Relative JavaScript redirect targets are resolved against the current response URL before being requested
 
 ### Performance & Usability Enhancements (v2.9.0)
 - **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution
@@ -227,7 +234,7 @@ Options:
   -6, --ipv6                       Enable IPv6 scanning
   -k, --insecure                   Allow insecure SSL connections
   -v, --verbose                    Enable verbose output with response headers
-  -L, --follow                     Follow HTTP redirects
+  -L, --follow                     Follow HTTP redirects, including common JavaScript-triggered redirects
   -o, --output <FILE>              Output file base name (extension added based on format)
       --output-format <FORMAT>     Output format: stdout, txt, json, html, csv, sqlite/db, all (default: stdout)
   -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
@@ -394,6 +401,11 @@ terminus -f urls.txt --output-format all -o scan_results
 **Test with proxy (Burp Suite)**:
 ```bash
 terminus -u https://example.com -x http://127.0.0.1:8080 -k
+```
+
+**Follow JavaScript-triggered redirects**:
+```bash
+terminus -u https://example.com/login -L
 ```
 
 **Test with custom headers**:

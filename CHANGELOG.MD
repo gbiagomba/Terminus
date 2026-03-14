@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] - 2026-03-14
+
+### Added
+- **JavaScript Redirect Following**:
+  - `-L` now follows common JavaScript-triggered redirects in response bodies
+  - Supports `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
+  - Resolves relative redirect targets against the current URL before issuing the next request
+
+### Changed
+- **Redirect Handling**: The existing manual redirect flow now handles both HTTP header redirects and body-driven JavaScript redirects
+- **Version**: Bumped from 2.12.0 to 2.13.0
+
+### Tests
+- Added unit coverage for JavaScript redirect extraction and relative URL resolution
+
 ## [2.12.0] - 2026-02-23
 
 ### Added

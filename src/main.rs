@@ -842,86 +842,70 @@ fn main() -> Result<()> {
                             }
                         }
 
-                        // Handle redirects manually if -L flag is set
-                        if follow_redirects && status.is_redirection() {
-                            if let Some(location) = response_headers.get(reqwest::header::LOCATION) {
-                                if let Ok(location_str) = location.to_str() {
-                                    let mut redirect_url = location_str.to_string();
-                                    let mut redirect_count = 0;
-                                    let max_redirects = 10;
+                        // Handle redirects manually if -L flag is set, including body-driven JS redirects.
+                        if follow_redirects {
+                            let mut redirect_url = extract_redirect_target(
+                                full_url,
+                                &response_headers,
+                                body_text.as_deref(),
+                            );
+                            let mut redirect_count = 0;
+                            let max_redirects = 10;
 
-                                    while redirect_count < max_redirects {
-                                        // Make the redirect URL absolute if it's relative
-                                        if redirect_url.starts_with('/') {
-                                            // Relative URL - construct absolute URL
-                                            if let Ok(base_url) = reqwest::Url::parse(&full_url) {
-                                                if let Ok(absolute_url) = base_url.join(&redirect_url) {
-                                                    redirect_url = absolute_url.to_string();
-                                                }
-                                            }
+                            while redirect_count < max_redirects {
+                                let Some(next_url) = redirect_url.take() else {
+                                    break;
+                                };
+
+                                match client.request(req_method.clone(), &next_url)
+                                    .headers(custom_headers.clone())
+                                    .send() {
+                                    Ok(redirect_resp) => {
+                                        let redirect_status = redirect_resp.status();
+                                        let redirect_headers = redirect_resp.headers().clone();
+                                        let redirect_headers_str = if verbose {
+                                            Some(flatten_headers(&redirect_headers))
+                                        } else {
+                                            None
+                                        };
+                                        let redirect_body = redirect_resp.text().ok();
+
+                                        if let Ok(mut results_guard) = results.lock() {
+                                            results_guard.push(ScanResult {
+                                                url: next_url.clone(),
+                                                method: method.clone(),
+                                                arbitrary_method_used: arbitrary_method_used.clone(),
+                                                arbitrary_method_accepted,
+                                                method_confusion_suspected,
+                                                status: redirect_status.as_u16(),
+                                                port: *port,
+                                                headers: redirect_headers_str,
+                                                error: None,
+                                                body_preview: None,
+                                                matched_patterns: None,
+                                                extracted_links: None,
+                                                security_headers: None,
+                                                detected_errors: None,
+                                                reflection_detected: None,
+                                                http2_desync: None,
+                                                host_injection: None,
+                                                xff_bypass: None,
+                                                csrf_result: None,
+                                                ssrf_result: None,
+                                                request_headers: Some(request_headers_str.clone()),
+                                                response_body: redirect_body.clone(),
+                                            });
                                         }
 
-                                        // Follow the redirect
-                                        match client.request(req_method.clone(), &redirect_url)
-                                            .headers(custom_headers.clone())
-                                            .send() {
-                                            Ok(redirect_resp) => {
-                                                let redirect_status = redirect_resp.status();
-                                                let redirect_headers = redirect_resp.headers().clone();
-                                                let redirect_headers_str = if verbose {
-                                                    Some(flatten_headers(&redirect_headers))
-                                                } else {
-                                                    None
-                                                };
-                                                let redirect_body = redirect_resp.text().ok();
-
-                                                // Log this redirect step
-                                                if let Ok(mut results_guard) = results.lock() {
-                                                    results_guard.push(ScanResult {
-                                                        url: redirect_url.clone(),
-                                                        method: method.clone(),
-                                                        arbitrary_method_used: arbitrary_method_used.clone(),
-                                                        arbitrary_method_accepted,
-                                                        method_confusion_suspected,
-                                                        status: redirect_status.as_u16(),
-                                                        port: *port,
-                                                        headers: redirect_headers_str,
-                                                        error: None,
-                                                        body_preview: None,
-                                                        matched_patterns: None,
-                                                        extracted_links: None,
-                                                        security_headers: None,
-                                                        detected_errors: None,
-                                                        reflection_detected: None,
-                                                        http2_desync: None,
-                                                        host_injection: None,
-                                                        xff_bypass: None,
-                                                        csrf_result: None,
-                                                        ssrf_result: None,
-                                                        request_headers: Some(request_headers_str.clone()),
-                                                        response_body: redirect_body,
-                                                    });
-                                                }
-
-                                                // Check if this is another redirect
-                                                if redirect_status.is_redirection() {
-                                                    if let Some(next_location) = redirect_headers.get(reqwest::header::LOCATION) {
-                                                        if let Ok(next_location_str) = next_location.to_str() {
-                                                            redirect_url = next_location_str.to_string();
-                                                            redirect_count += 1;
-                                                            continue;
-                                                        }
-                                                    }
-                                                }
-
-                                                // Not a redirect or no location header - stop following
-                                                break;
-                                            }
-                                            Err(_) => {
-                                                // Error following redirect - stop
-                                                break;
-                                            }
-                                        }
+                                        redirect_url = extract_redirect_target(
+                                            &next_url,
+                                            &redirect_headers,
+                                            redirect_body.as_deref(),
+                                        );
+                                        redirect_count += 1;
+                                    }
+                                    Err(_) => {
+                                        break;
                                     }
                                 }
                             }
@@ -1011,6 +995,60 @@ fn build_reqwest_method(method: &str) -> Method {
             .collect();
         Method::from_bytes(sanitized.as_bytes()).unwrap_or(Method::GET)
     })
+}
+
+fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<String> {
+    let trimmed = redirect_target.trim().trim_matches(|c| c == '"' || c == '\'' || c == '`');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = reqwest::Url::parse(trimmed) {
+        return Some(parsed.to_string());
+    }
+
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|base| base.join(trimmed).ok())
+        .map(|url| url.to_string())
+}
+
+fn extract_js_redirect_target(body: &str) -> Option<String> {
+    let patterns = [
+        r#"(?is)(?:window|document|self|top)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)window\.navigate\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+    ];
+
+    for pattern in patterns {
+        if let Ok(regex) = Regex::new(pattern) {
+            if let Some(captures) = regex.captures(body) {
+                if let Some(target) = captures.get(1) {
+                    return Some(target.as_str().to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn extract_redirect_target(
+    base_url: &str,
+    headers: &HeaderMap,
+    response_body: Option<&str>,
+) -> Option<String> {
+    if let Some(location) = headers.get(reqwest::header::LOCATION) {
+        if let Ok(location_str) = location.to_str() {
+            if let Some(resolved) = resolve_redirect_target(base_url, location_str) {
+                return Some(resolved);
+            }
+        }
+    }
+
+    response_body
+        .and_then(extract_js_redirect_target)
+        .and_then(|target| resolve_redirect_target(base_url, &target))
 }
 
 fn read_lines<P: AsRef<Path>>(filename: P) -> Result<Vec<String>> {
@@ -3335,5 +3373,53 @@ fn perform_ssrf_check(
         tested_payloads,
         response_indicators,
         issues,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_js_location_href_redirect() {
+        let body = r#"<script>window.location.href = "/dashboard";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/dashboard"));
+    }
+
+    #[test]
+    fn extracts_js_location_replace_redirect() {
+        let body = r#"<script>window.location.replace('https://example.com/login');</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("https://example.com/login"));
+    }
+
+    #[test]
+    fn resolves_relative_js_redirect_against_base_url() {
+        let headers = HeaderMap::new();
+        let redirect = extract_redirect_target(
+            "https://example.com/app/index.html",
+            &headers,
+            Some(r#"<script>location.assign('../home');</script>"#),
+        );
+
+        assert_eq!(redirect.as_deref(), Some("https://example.com/home"));
+    }
+
+    #[test]
+    fn prefers_location_header_over_js_redirect() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::LOCATION,
+            HeaderValue::from_static("/http-redirect"),
+        );
+
+        let redirect = extract_redirect_target(
+            "https://example.com/start",
+            &headers,
+            Some(r#"<script>window.location='/js-redirect';</script>"#),
+        );
+
+        assert_eq!(redirect.as_deref(), Some("https://example.com/http-redirect"));
     }
 }
