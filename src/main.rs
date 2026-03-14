@@ -208,7 +208,7 @@ fn main() -> Result<()> {
         .arg(Arg::new("ipv6").short('6').long("ipv6").help("Enable IPv6 scanning").action(ArgAction::SetTrue))
         .arg(Arg::new("insecure").short('k').long("insecure").help("Allow insecure SSL connections").action(ArgAction::SetTrue))
         .arg(Arg::new("verbose").short('v').long("verbose").help("Enable verbose output with response headers").action(ArgAction::SetTrue))
-        .arg(Arg::new("follow").short('L').long("follow").help("Follow HTTP redirects").action(ArgAction::SetTrue))
+        .arg(Arg::new("follow").short('L').long("follow").help("Follow HTTP redirects, including common JavaScript-triggered redirects").action(ArgAction::SetTrue))
         .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name (extension added based on format)"))
         .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, sqlite/db, all (default: stdout)"))
         .arg(Arg::new("filter").short('F').long("filter-code").value_name("STATUS_CODE").help("Filter results by HTTP status code"))
