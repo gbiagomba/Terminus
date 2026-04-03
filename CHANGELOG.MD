@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-04-03
+
+### Added
+- **Async Transport Layer**: New transport abstraction with `Http12Transport` and `Http3Transport`
+- **HTTP/3 Support**: Real QUIC/HTTP/3 support when `--http-version 3` is selected
+- **Async Scan Engine**: Tokio-based request execution with async concurrency and rate limiting
+
+### Changed
+- **HTTP Version Control**: `--http-version` now accepts `3` / `3.0`
+- **Concurrency**: Scan execution moved from Rayon threads to async task concurrency
+- **Dependencies**: Removed reqwest blocking + Rayon; added Tokio + async-trait + HTTP/URL helpers
+
+### Notes
+- HTTP/3 requires HTTPS targets and does not support proxy configuration
+- reqwest HTTP/3 support is enabled via `--cfg reqwest_unstable` (set in `.cargo/config.toml`)
+
 ## [3.0.0] - 2026-04-03
 
 ### Added

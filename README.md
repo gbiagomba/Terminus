@@ -19,6 +19,7 @@
   - [Arbitrary Method Fuzzing](#arbitrary-method-fuzzing-v2120)
   - [Interactive SQLite Mode](#interactive-sqlite-mode-v2120)
   - [JavaScript Redirect Following](#javascript-redirect-following-v2130)
+  - [Async Transport & HTTP/3](#async-transport--http3-v310)
 - [Installation](#installation)
   - [Using the Makefile](#using-the-makefile)
 - [Usage](#usage)
@@ -80,12 +81,12 @@
   - Custom Ports: Specify comma-separated ports like `80,443,8080` with `-p` flag
   - File-based: Automatically uses ports from nmap/testssl/nuclei scan outputs
   - URL-embedded: Respects ports already specified in URLs (e.g., `http://example.com:8080`)
-- **HTTP Version Control**: Force HTTP/1.0, 1.1, or 2.0 using `--http-version`
-  - **Note**: HTTP/3 is not currently supported due to limitations in the reqwest library's blocking API. HTTP/3 requires QUIC protocol and async runtime, which would require a complete rewrite of the tool. This may be added in a future major version.
+- **HTTP Version Control**: Force HTTP/1.0, 1.1, 2.0, or 3.0 using `--http-version`
+  - **HTTP/3 Note**: HTTP/3 requires QUIC over HTTPS and does not support proxies. When `--http-version 3` is selected, Terminus uses its async QUIC transport; non-HTTPS URLs or proxy use will return a friendly error.
 - **Status Code Filtering**: Filter responses by status code using `-F`
 
 ### Advanced Features
-- **Concurrent Scanning**: Multi-threaded scanning with configurable thread count using `-t/--threads` flag (default: 10 threads)
+- **Concurrent Scanning**: Async concurrency with configurable task count using `-t/--threads` flag (default: 10)
 - **Proxy Support**: Route traffic through proxy tools like Burp Suite using `-x` flag
 - **Custom Headers**: Add headers via `-H` flag (multiple allowed) or `--header-file`
 - **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
@@ -141,6 +142,12 @@
 - **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies
 - **Supported Patterns**: `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
 - **Relative URL Resolution**: Relative JavaScript redirect targets are resolved against the current response URL before being requested
+
+### Async Transport & HTTP/3 (v3.1.0)
+- **Async Transport Core**: Request execution moved to Tokio async with a transport abstraction layer
+- **HTTP/3 Support**: Real QUIC/HTTP/3 support via reqwest's HTTP/3 transport when `--http-version 3` is selected
+- **Graceful Degradation**: HTTP/3 emits friendly errors when unavailable (e.g., non-HTTPS targets or proxy usage)
+- **Build Note**: HTTP/3 relies on reqwest's unstable flag, enabled in `.cargo/config.toml` via `--cfg reqwest_unstable`
 
 ### Performance & Usability Enhancements (v2.9.0)
 - **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution

@@ -7,12 +7,14 @@ mod models;
 mod output;
 mod scan;
 mod storage;
+mod transport;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let matches = cli::build_cli().get_matches();
 
     match matches.subcommand() {
-        Some(("scan", sub)) => scan::run_scan(sub),
+        Some(("scan", sub)) => scan::run_scan(sub).await,
         Some(("diff", sub)) => {
             let base = sub.get_one::<String>("base").expect("base is required");
             let compare = sub.get_one::<String>("compare").expect("compare is required");

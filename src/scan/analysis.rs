@@ -1,8 +1,8 @@
 use regex::Regex;
-use reqwest::header::HeaderMap;
 use std::collections::HashSet;
 
 use crate::models::SecurityHeaders;
+use crate::scan::http::header_value;
 
 pub fn extract_links_from_body(body: &str) -> Vec<String> {
     let mut links = HashSet::new();
@@ -30,7 +30,7 @@ pub fn extract_links_from_body(body: &str) -> Vec<String> {
     links.into_iter().collect()
 }
 
-pub fn analyze_security_headers(headers: &HeaderMap) -> SecurityHeaders {
+pub fn analyze_security_headers(headers: &[(String, String)]) -> SecurityHeaders {
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut issues = Vec::new();
@@ -46,28 +46,27 @@ pub fn analyze_security_headers(headers: &HeaderMap) -> SecurityHeaders {
     ];
 
     for (header_name, display_name) in security_header_checks {
-        if let Some(value) = headers.get(header_name) {
+        if let Some(value) = header_value(headers, header_name) {
             present.push(display_name.to_string());
 
-            if let Ok(val_str) = value.to_str() {
-                match header_name {
-                    "content-security-policy" => {
-                        if val_str.contains("'unsafe-inline'") || val_str.contains("'unsafe-eval'") {
-                            issues.push(format!("CSP contains unsafe directives: {}", val_str));
-                        }
+            match header_name {
+                "content-security-policy" => {
+                    if value.contains("'unsafe-inline'") || value.contains("'unsafe-eval'") {
+                        issues.push(format!("CSP contains unsafe directives: {}", value));
                     }
-                    "x-frame-options" => {
-                        if !val_str.to_lowercase().contains("deny") && !val_str.to_lowercase().contains("sameorigin") {
-                            issues.push(format!("Weak X-Frame-Options: {}", val_str));
-                        }
-                    }
-                    "strict-transport-security" => {
-                        if !val_str.contains("max-age") {
-                            issues.push("HSTS missing max-age directive".to_string());
-                        }
-                    }
-                    _ => {}
                 }
+                "x-frame-options" => {
+                    let lower = value.to_lowercase();
+                    if !lower.contains("deny") && !lower.contains("sameorigin") {
+                        issues.push(format!("Weak X-Frame-Options: {}", value));
+                    }
+                }
+                "strict-transport-security" => {
+                    if !value.contains("max-age") {
+                        issues.push("HSTS missing max-age directive".to_string());
+                    }
+                }
+                _ => {}
             }
         } else {
             missing.push(display_name.to_string());
@@ -81,16 +80,14 @@ pub fn analyze_security_headers(headers: &HeaderMap) -> SecurityHeaders {
     ];
 
     for (header_name, issue_desc) in problematic_headers {
-        if headers.get(header_name).is_some() {
+        if header_value(headers, header_name).is_some() {
             issues.push(issue_desc.to_string());
         }
     }
 
-    if let Some(cors) = headers.get("access-control-allow-origin") {
-        if let Ok(val_str) = cors.to_str() {
-            if val_str == "*" {
-                issues.push("CORS allows all origins (*)".to_string());
-            }
+    if let Some(cors) = header_value(headers, "access-control-allow-origin") {
+        if cors == "*" {
+            issues.push("CORS allows all origins (*)".to_string());
         }
     }
 
@@ -107,25 +104,25 @@ pub fn detect_error_messages(body: &str) -> Vec<String> {
     let error_patterns = vec![
         (r"SQLException|SQL syntax|mysql_fetch|mysql_num_rows|mysql_query", "SQL Error"),
         (r"ORA-[0-9]+", "Oracle Error"),
-        (r"com\.mysql\.jdbc\.exceptions", "MySQL JDBC Exception"),
-        (r"SQLSTATE\[\d+\]", "SQLSTATE Error"),
+        (r"com\\.mysql\\.jdbc\\.exceptions", "MySQL JDBC Exception"),
+        (r"SQLSTATE\\[\\d+\\]", "SQLSTATE Error"),
         (r"Microsoft OLE DB Provider", "MS SQL Error"),
         (r"Unclosed quotation mark", "SQL Injection Error"),
-        (r"System\.Data\.SqlClient", ".NET SQL Client Error"),
+        (r"System\\.Data\\.SqlClient", ".NET SQL Client Error"),
         (r"psql: FATAL", "PostgreSQL Error"),
         (r"Warning: mysql_", "MySQL Warning"),
-        (r"java\.sql\.SQLException", "Java SQL Exception"),
-        (r"com\.mysql\.jdbc\.exceptions", "MySQL JDBC Exception"),
-        (r"macromedia\.jdbc\.sqlserver", "SQL Server JDBC Exception"),
-        (r"javax\.servlet\.ServletException", "Java Servlet Exception"),
-        (r"Traceback \(most recent call last\)", "Python Traceback"),
+        (r"java\\.sql\\.SQLException", "Java SQL Exception"),
+        (r"com\\.mysql\\.jdbc\\.exceptions", "MySQL JDBC Exception"),
+        (r"macromedia\\.jdbc\\.sqlserver", "SQL Server JDBC Exception"),
+        (r"javax\\.servlet\\.ServletException", "Java Servlet Exception"),
+        (r"Traceback \\(most recent call last\\)", "Python Traceback"),
         (r"Stack trace", "Stack Trace"),
         (r"Fatal error", "Fatal Error"),
         (r"Notice: Undefined variable", "PHP Notice"),
-        (r"Warning: include\(", "PHP Include Warning"),
+        (r"Warning: include\\(", "PHP Include Warning"),
         (r"Undefined index", "PHP Undefined Index"),
-        (r"System\.NullReferenceException", ".NET Null Reference"),
-        (r"at java\.", "Java Stack Trace"),
+        (r"System\\.NullReferenceException", ".NET Null Reference"),
+        (r"at java\\.", "Java Stack Trace"),
         (r"Microsoft VBScript runtime error", "VBScript Error"),
         (r"Application Error", "Application Error"),
         (r"Internal Server Error", "500 Error"),
@@ -148,20 +145,20 @@ pub fn check_reflection(body: &str, marker: &str) -> bool {
     }
 
     let reflection_indicators = vec![
-        r"document\.write\(",
-        r"innerHTML\s*=",
-        r"outerHTML\s*=",
-        r"document\.cookie",
-        r"eval\(",
-        r"setTimeout\(",
-        r"setInterval\(",
-        r"onerror\s*=",
-        r"onload\s*=",
-        r"onclick\s*=",
-        r"onmouseover\s*=",
-        r"onfocus\s*=",
-        r"onblur\s*=",
-        r"onchange\s*=",
+        r"document\\.write\\(",
+        r"innerHTML\\s*=",
+        r"outerHTML\\s*=",
+        r"document\\.cookie",
+        r"eval\\(",
+        r"setTimeout\\(",
+        r"setInterval\\(",
+        r"onerror\\s*=",
+        r"onload\\s*=",
+        r"onclick\\s*=",
+        r"onmouseover\\s*=",
+        r"onfocus\\s*=",
+        r"onblur\\s*=",
+        r"onchange\\s*=",
     ];
 
     for pattern in &reflection_indicators {
@@ -173,7 +170,7 @@ pub fn check_reflection(body: &str, marker: &str) -> bool {
     }
 
     if body.contains("?") && (body.contains("=") || body.contains("&")) {
-        let param_pattern = Regex::new(r"[?&](\w+)=([^&\s<>]+)").unwrap();
+        let param_pattern = Regex::new(r"[?&](\\w+)=([^&\\s<>]+)").unwrap();
         if param_pattern.is_match(body) {
             return true;
         }

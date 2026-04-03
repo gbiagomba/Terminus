@@ -1,16 +1,17 @@
 use anyhow::{Context, Result};
 use clap::ArgMatches;
-use rayon::prelude::*;
+use http::StatusCode;
+use rand::RngExt;
 use regex::Regex;
-use reqwest::blocking::ClientBuilder;
-use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{StatusCode, Version};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::io;
-use std::str::FromStr;
 use std::process;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
+use std::str::FromStr;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{sleep, Instant};
 
 use crate::models::{OutputFormat, ScanResult};
 use crate::output::{collect_vuln_indicators, output_results};
@@ -20,14 +21,17 @@ use crate::scan::exploits::{
     perform_ssrf_check, perform_xff_bypass_check,
 };
 use crate::scan::http::{
-    build_full_url, build_reqwest_method, extract_redirect_target, flatten_headers, parse_header,
+    build_full_url, extract_redirect_target, flatten_headers, normalize_method, parse_header,
 };
 use crate::scan::input::{parse_input_file, read_lines, read_stdin};
 use crate::scan::{ARBITRARY_HTTP_METHODS, HTTP_METHODS};
+use crate::transport::{
+    Http12Transport, Http3Transport, HttpTransport, HttpVersion, TerminusRequest, TransportConfig,
+};
 
 struct RateLimiter {
     requests_per_second: f64,
-    last_request: std::time::Instant,
+    last_request: Instant,
 }
 
 impl RateLimiter {
@@ -49,23 +53,34 @@ impl RateLimiter {
 
         Ok(RateLimiter {
             requests_per_second,
-            last_request: std::time::Instant::now(),
+            last_request: Instant::now(),
         })
     }
 
-    fn wait(&mut self) {
-        let interval = std::time::Duration::from_secs_f64(1.0 / self.requests_per_second);
+    async fn wait(&mut self) {
+        let interval = Duration::from_secs_f64(1.0 / self.requests_per_second);
         let elapsed = self.last_request.elapsed();
 
         if elapsed < interval {
-            std::thread::sleep(interval - elapsed);
+            sleep(interval - elapsed).await;
         }
 
-        self.last_request = std::time::Instant::now();
+        self.last_request = Instant::now();
     }
 }
 
-pub fn run_scan(matches: &ArgMatches) -> Result<()> {
+fn build_request(url: &str, method: &str, headers: &[(String, String)]) -> TerminusRequest {
+    TerminusRequest {
+        url: url.to_string(),
+        method: method.to_string(),
+        headers: headers.to_vec(),
+        body: None,
+        timeout: None,
+        version: None,
+    }
+}
+
+pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let verbose = matches.get_flag("verbose");
     let allow_insecure = matches.get_flag("insecure");
     let follow_redirects = matches.get_flag("follow");
@@ -73,11 +88,6 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
     let thread_count: usize = matches.get_one::<String>("threads")
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
-
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(thread_count)
-        .build_global()
-        .context("Failed to initialize thread pool")?;
 
     let scan_level = matches.get_one::<String>("scan-level").map(|s| s.as_str());
 
@@ -126,34 +136,34 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
         .transpose()
         .context("Invalid regex pattern")?;
 
-    let mut client_builder = ClientBuilder::new()
-        .danger_accept_invalid_certs(allow_insecure)
-        .redirect(reqwest::redirect::Policy::none());
-
-    if let Some(proxy_url) = matches.get_one::<String>("proxy") {
-        let proxy = reqwest::Proxy::all(proxy_url)
-            .context("Failed to configure proxy")?;
-        client_builder = client_builder.proxy(proxy);
-    }
-
-    if let Some(version_str) = matches.get_one::<String>("http-version") {
-        let version = match version_str.as_str() {
-            "1.0" => Version::HTTP_10,
-            "1.1" => Version::HTTP_11,
-            "2" | "2.0" => Version::HTTP_2,
+    let http_version = if let Some(version_str) = matches.get_one::<String>("http-version") {
+        match version_str.as_str() {
+            "1.0" => HttpVersion::Http10,
+            "1.1" => HttpVersion::Http11,
+            "2" | "2.0" => HttpVersion::Http2,
+            "3" | "3.0" => HttpVersion::Http3,
             _ => {
-                eprintln!("Invalid HTTP version: {}. Supported: 1.0, 1.1, 2", version_str);
+                eprintln!("Invalid HTTP version: {}. Supported: 1.0, 1.1, 2, 3", version_str);
                 process::exit(1);
             }
-        };
-        if version == Version::HTTP_2 {
-            client_builder = client_builder.http2_prior_knowledge();
         }
-    }
+    } else {
+        HttpVersion::Http11
+    };
 
-    let client = client_builder
-        .build()
-        .context("Failed to build HTTP client")?;
+    let proxy_url = matches.get_one::<String>("proxy").map(|s| s.to_string());
+
+    let transport_config = TransportConfig {
+        allow_insecure,
+        proxy: proxy_url.clone(),
+        http_version,
+        timeout: None,
+    };
+
+    let transport: Arc<dyn HttpTransport> = match http_version {
+        HttpVersion::Http3 => Arc::new(Http3Transport::new(transport_config)?),
+        _ => Arc::new(Http12Transport::new(transport_config)?),
+    };
 
     let output_format = matches
         .get_one::<String>("output-format")
@@ -185,9 +195,10 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
                 methods_set.insert(method.to_string());
             }
         } else {
-            methods_set.insert(m.to_uppercase());
-            if !standard_methods.contains(&m.to_uppercase()) {
-                arbitrary_methods.insert(m.to_uppercase());
+            let method_upper = normalize_method(m);
+            methods_set.insert(method_upper.clone());
+            if !standard_methods.contains(&method_upper) {
+                arbitrary_methods.insert(method_upper);
             }
         }
     } else {
@@ -203,7 +214,7 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
 
     if let Some(custom_methods) = matches.get_many::<String>("custom-method") {
         for method in custom_methods {
-            let method_upper = method.to_uppercase();
+            let method_upper = normalize_method(method);
             methods_set.insert(method_upper.clone());
             arbitrary_methods.insert(method_upper);
         }
@@ -217,7 +228,7 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
                     if trimmed.is_empty() || trimmed.starts_with('#') {
                         continue;
                     }
-                    let method_upper = trimmed.to_uppercase();
+                    let method_upper = normalize_method(trimmed);
                     methods_set.insert(method_upper.clone());
                     arbitrary_methods.insert(method_upper);
                 }
@@ -247,12 +258,12 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
     let rate_limiter = Arc::new(Mutex::new(rate_limiter_option));
     let results = Arc::new(Mutex::new(Vec::new()));
 
-    let mut custom_headers = HeaderMap::new();
+    let mut custom_headers: Vec<(String, String)> = Vec::new();
 
     if let Some(headers) = matches.get_many::<String>("header") {
         for header in headers {
             if let Some((key, value)) = parse_header(header) {
-                custom_headers.insert(key, value);
+                custom_headers.push((key, value));
             } else {
                 eprintln!("Warning: Invalid header format: {}", header);
             }
@@ -264,7 +275,7 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
             Ok(lines) => {
                 for line in lines {
                     if let Some((key, value)) = parse_header(&line) {
-                        custom_headers.insert(key, value);
+                        custom_headers.push((key, value));
                     }
                 }
             }
@@ -296,11 +307,7 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
     }
 
     if !cookie_string.is_empty() {
-        if let Ok(cookie_value) = HeaderValue::from_str(&cookie_string) {
-            custom_headers.insert(reqwest::header::COOKIE, cookie_value);
-        } else {
-            eprintln!("Warning: Invalid cookie format");
-        }
+        custom_headers.push(("Cookie".to_string(), cookie_string));
     }
 
     let mut scan_targets = Vec::new();
@@ -327,37 +334,27 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
         }
     }
 
-    let mut baseline_statuses = std::collections::HashMap::new();
+    let mut baseline_statuses: HashMap<String, u16> = HashMap::new();
     if !arbitrary_methods.is_empty() {
         let mut seen = HashSet::new();
         for (_, _port, full_url) in &scan_targets {
             if !seen.insert(full_url.clone()) {
                 continue;
             }
-            if let Ok(mut limiter_guard) = rate_limiter.lock() {
-                if let Some(ref mut limiter) = *limiter_guard {
-                    limiter.wait();
-                }
+            let mut limiter_guard = rate_limiter.lock().await;
+            if let Some(ref mut limiter) = *limiter_guard {
+                limiter.wait().await;
             }
 
             if let Some((min, max)) = random_delay_range {
-                use rand::RngExt;
                 let delay = rand::rng().random_range(min..=max);
-                std::thread::sleep(std::time::Duration::from_secs(delay));
+                sleep(Duration::from_secs(delay)).await;
             }
 
-            let baseline_method = build_reqwest_method("GET");
-            let status = client.request(baseline_method, full_url)
-                .headers(custom_headers.clone())
-                .send()
-                .map(|resp| resp.status().as_u16())
-                .ok();
+            let request = build_request(full_url, "GET", &custom_headers);
+            let status = transport.send(request).await.map(|resp| resp.status).unwrap_or(0);
 
-            if let Some(code) = status {
-                baseline_statuses.insert(full_url.clone(), code);
-            } else {
-                baseline_statuses.insert(full_url.clone(), 0);
-            }
+            baseline_statuses.insert(full_url.clone(), status);
         }
     }
 
@@ -371,341 +368,392 @@ pub fn run_scan(matches: &ArgMatches) -> Result<()> {
         }
     }
 
-    scan_tasks.par_iter().for_each(|(url, method, port, full_url)| {
-        let req_method = build_reqwest_method(method);
-        let is_arbitrary_method = arbitrary_methods.contains(method);
-        let arbitrary_method_used = if is_arbitrary_method {
-            Some(method.clone())
-        } else {
-            None
-        };
+    let semaphore = Arc::new(Semaphore::new(thread_count));
 
-        if let Ok(mut limiter_guard) = rate_limiter.lock() {
+    let mut handles = Vec::new();
+    for (url, method, port, full_url) in scan_tasks {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let rate_limiter = Arc::clone(&rate_limiter);
+        let results = Arc::clone(&results);
+        let custom_headers = custom_headers.clone();
+        let arbitrary_methods = Arc::clone(&arbitrary_methods);
+        let baseline_statuses = Arc::clone(&baseline_statuses);
+        let transport = Arc::clone(&transport);
+        let grep_pattern = grep_pattern.clone();
+        let random_delay_range = random_delay_range;
+        let proxy_url = proxy_url.clone();
+
+        let handle = tokio::spawn(async move {
+            let _permit = permit;
+            let request_headers_str = flatten_headers(&custom_headers);
+
+            let mut limiter_guard = rate_limiter.lock().await;
             if let Some(ref mut limiter) = *limiter_guard {
-                limiter.wait();
+                limiter.wait().await;
             }
-        }
 
-        if let Some((min, max)) = random_delay_range {
-            use rand::RngExt;
-            let delay = rand::rng().random_range(min..=max);
-            std::thread::sleep(std::time::Duration::from_secs(delay));
-        }
+            if let Some((min, max)) = random_delay_range {
+                let delay = rand::rng().random_range(min..=max);
+                sleep(Duration::from_secs(delay)).await;
+            }
 
-        let request_headers_str = flatten_headers(&custom_headers);
+            let is_arbitrary_method = arbitrary_methods.contains(&method);
+            let arbitrary_method_used = if is_arbitrary_method {
+                Some(method.clone())
+            } else {
+                None
+            };
 
-        match client.request(req_method.clone(), full_url)
-                    .headers(custom_headers.clone())
-                    .send() {
-                    Ok(resp) => {
-                        let status = resp.status();
-                        if let Some(filter) = filter_code {
-                            if status != filter {
-                                return;
-                            }
+            let request = build_request(&full_url, &method, &custom_headers);
+
+            match transport.send(request).await {
+                Ok(resp) => {
+                    let status = resp.status;
+                    if let Some(filter) = filter_code {
+                        if status != filter.as_u16() {
+                            return;
+                        }
+                    }
+
+                    let mut arbitrary_method_accepted = None;
+                    let mut method_confusion_suspected = None;
+
+                    if is_arbitrary_method {
+                        if status >= 200 && status < 400 {
+                            arbitrary_method_accepted = Some(true);
+                        } else {
+                            arbitrary_method_accepted = Some(false);
                         }
 
-                        let mut arbitrary_method_accepted = None;
-                        let mut method_confusion_suspected = None;
-
-                        if is_arbitrary_method {
-                            if status.is_success() || status.is_redirection() {
-                                arbitrary_method_accepted = Some(true);
+                        if let Some(baseline) = baseline_statuses.get(&full_url) {
+                            if *baseline != 0 && *baseline != status {
+                                method_confusion_suspected = Some(true);
                             } else {
-                                arbitrary_method_accepted = Some(false);
-                            }
-
-                            if let Some(baseline) = baseline_statuses.get(full_url) {
-                                if *baseline != 0 && *baseline != status.as_u16() {
-                                    method_confusion_suspected = Some(true);
-                                } else {
-                                    method_confusion_suspected = Some(false);
-                                }
-                            }
-                        }
-
-                        let headers_str = if verbose {
-                            Some(flatten_headers(resp.headers()))
-                        } else {
-                            None
-                        };
-
-                        let response_headers = resp.headers().clone();
-                        let body_text = resp.text().ok();
-                        let response_body = body_text.clone();
-
-                        let body_preview = if check_body {
-                            body_text.as_ref().map(|b| {
-                                let preview = b.chars().take(200).collect::<String>();
-                                if b.len() > 200 {
-                                    format!("{}...", preview)
-                                } else {
-                                    preview
-                                }
-                            })
-                        } else {
-                            None
-                        };
-
-                        let matched_patterns = if let Some(ref pattern) = grep_pattern {
-                            body_text.as_ref().and_then(|b| {
-                                let matches: Vec<String> = pattern.find_iter(b)
-                                    .map(|m| m.as_str().to_string())
-                                    .collect();
-                                if matches.is_empty() {
-                                    None
-                                } else {
-                                    Some(matches)
-                                }
-                            })
-                        } else {
-                            None
-                        };
-
-                        let extracted_links = if extract_links {
-                            body_text.as_ref().map(|b| extract_links_from_body(b))
-                        } else {
-                            None
-                        };
-
-                        let security_headers = if check_security_headers {
-                            Some(analyze_security_headers(&response_headers))
-                        } else {
-                            None
-                        };
-
-                        let detected_errors = if detect_errors {
-                            body_text.as_ref().and_then(|b| {
-                                let errors = detect_error_messages(b);
-                                if errors.is_empty() {
-                                    None
-                                } else {
-                                    Some(errors)
-                                }
-                            })
-                        } else {
-                            None
-                        };
-
-                        let reflection_detected = if detect_reflection {
-                            let reflection_marker = format!("terminus_test_{}", rand::random::<u64>());
-                            body_text.as_ref().map(|b| check_reflection(b, &reflection_marker))
-                        } else {
-                            None
-                        };
-
-                        let should_add = if grep_pattern.is_some() {
-                            matched_patterns.is_some()
-                        } else {
-                            true
-                        };
-
-                        let http2_desync = if http2_desync_check && full_url.starts_with("https") {
-                            let proxy_url_opt = matches.get_one::<String>("proxy").map(|s| s.as_str());
-                            Some(perform_http2_desync_check(&client, full_url, &req_method, &custom_headers, status.as_u16(), proxy_url_opt))
-                        } else {
-                            None
-                        };
-
-                        let host_injection = if detect_host_injection {
-                            Some(perform_host_injection_check(&client, full_url, &req_method, &custom_headers))
-                        } else {
-                            None
-                        };
-
-                        let xff_bypass = if detect_xff_bypass {
-                            Some(perform_xff_bypass_check(&client, full_url, &req_method, &custom_headers, status.as_u16()))
-                        } else {
-                            None
-                        };
-
-                        let csrf_result = if detect_csrf {
-                            Some(perform_csrf_check(&client, full_url, &req_method, &custom_headers))
-                        } else {
-                            None
-                        };
-
-                        let ssrf_result = if detect_ssrf {
-                            Some(perform_ssrf_check(&client, full_url, &req_method, &custom_headers))
-                        } else {
-                            None
-                        };
-
-                        if should_add {
-                            if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
-                                let temp_result = ScanResult {
-                                    url: url.clone(),
-                                    method: method.clone(),
-                                    arbitrary_method_used: arbitrary_method_used.clone(),
-                                    arbitrary_method_accepted,
-                                    method_confusion_suspected,
-                                    status: status.as_u16(),
-                                    port: *port,
-                                    headers: headers_str.clone(),
-                                    error: None,
-                                    body_preview: body_preview.clone(),
-                                    matched_patterns: matched_patterns.clone(),
-                                    extracted_links: extracted_links.clone(),
-                                    security_headers: security_headers.clone(),
-                                    detected_errors: detected_errors.clone(),
-                                    reflection_detected,
-                                    http2_desync: http2_desync.clone(),
-                                    host_injection: host_injection.clone(),
-                                    xff_bypass: xff_bypass.clone(),
-                                    csrf_result: csrf_result.clone(),
-                                    ssrf_result: ssrf_result.clone(),
-                                    request_headers: Some(request_headers_str.clone()),
-                                    response_body: response_body.clone(),
-                                };
-
-                                let vuln_indicators = collect_vuln_indicators(&temp_result);
-                                let indicators_str = if !vuln_indicators.is_empty() {
-                                    format!(" {}", vuln_indicators.join(" "))
-                                } else {
-                                    String::new()
-                                };
-
-                                if let Some(ref headers) = headers_str {
-                                    println!("URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}{}",
-                                        url, method, status.as_u16(), port, headers, indicators_str);
-                                } else {
-                                    println!("URL: {}, Method: {}, Status: {}, Port: {}{}",
-                                        url, method, status.as_u16(), port, indicators_str);
-                                }
-                            }
-
-                            if let Ok(mut results_guard) = results.lock() {
-                                results_guard.push(ScanResult {
-                                    url: url.clone(),
-                                    method: method.clone(),
-                                    arbitrary_method_used: arbitrary_method_used.clone(),
-                                    arbitrary_method_accepted,
-                                    method_confusion_suspected,
-                                    status: status.as_u16(),
-                                    port: *port,
-                                    headers: headers_str.clone(),
-                                    error: None,
-                                    body_preview,
-                                    matched_patterns,
-                                    extracted_links,
-                                    security_headers,
-                                    detected_errors,
-                                    reflection_detected,
-                                    http2_desync,
-                                    host_injection,
-                                    xff_bypass,
-                                    csrf_result,
-                                    ssrf_result,
-                                    request_headers: Some(request_headers_str.clone()),
-                                    response_body,
-                                });
-                            }
-                        }
-
-                        if follow_redirects {
-                            let mut redirect_url = extract_redirect_target(
-                                full_url,
-                                &response_headers,
-                                body_text.as_deref(),
-                            );
-                            let mut redirect_count = 0;
-                            let max_redirects = 10;
-
-                            while redirect_count < max_redirects {
-                                let Some(next_url) = redirect_url.take() else {
-                                    break;
-                                };
-
-                                match client.request(req_method.clone(), &next_url)
-                                    .headers(custom_headers.clone())
-                                    .send() {
-                                    Ok(redirect_resp) => {
-                                        let redirect_status = redirect_resp.status();
-                                        let redirect_headers = redirect_resp.headers().clone();
-                                        let redirect_headers_str = if verbose {
-                                            Some(flatten_headers(&redirect_headers))
-                                        } else {
-                                            None
-                                        };
-                                        let redirect_body = redirect_resp.text().ok();
-
-                                        if let Ok(mut results_guard) = results.lock() {
-                                            results_guard.push(ScanResult {
-                                                url: next_url.clone(),
-                                                method: method.clone(),
-                                                arbitrary_method_used: arbitrary_method_used.clone(),
-                                                arbitrary_method_accepted,
-                                                method_confusion_suspected,
-                                                status: redirect_status.as_u16(),
-                                                port: *port,
-                                                headers: redirect_headers_str,
-                                                error: None,
-                                                body_preview: None,
-                                                matched_patterns: None,
-                                                extracted_links: None,
-                                                security_headers: None,
-                                                detected_errors: None,
-                                                reflection_detected: None,
-                                                http2_desync: None,
-                                                host_injection: None,
-                                                xff_bypass: None,
-                                                csrf_result: None,
-                                                ssrf_result: None,
-                                                request_headers: Some(request_headers_str.clone()),
-                                                response_body: redirect_body.clone(),
-                                            });
-                                        }
-
-                                        redirect_url = extract_redirect_target(
-                                            &next_url,
-                                            &redirect_headers,
-                                            redirect_body.as_deref(),
-                                        );
-                                        redirect_count += 1;
-                                    }
-                                    Err(_) => {
-                                        break;
-                                    }
-                                }
+                                method_confusion_suspected = Some(false);
                             }
                         }
                     }
-                    Err(e) => {
-                        if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
-                            eprintln!("Error on {}:{} using {}: {}", url, port, method, e);
-                        }
 
-                        if let Ok(mut results_guard) = results.lock() {
-                            results_guard.push(ScanResult {
+                    let headers_str = if verbose {
+                        Some(flatten_headers(&resp.headers))
+                    } else {
+                        None
+                    };
+
+                    let body_text = if resp.body.is_empty() {
+                        None
+                    } else {
+                        Some(String::from_utf8_lossy(&resp.body).to_string())
+                    };
+                    let response_body = body_text.clone();
+
+                    let body_preview = if check_body {
+                        body_text.as_ref().map(|b| {
+                            let preview = b.chars().take(200).collect::<String>();
+                            if b.len() > 200 {
+                                format!("{}...", preview)
+                            } else {
+                                preview
+                            }
+                        })
+                    } else {
+                        None
+                    };
+
+                    let matched_patterns = if let Some(ref pattern) = grep_pattern {
+                        body_text.as_ref().and_then(|b| {
+                            let matches: Vec<String> = pattern.find_iter(b)
+                                .map(|m| m.as_str().to_string())
+                                .collect();
+                            if matches.is_empty() {
+                                None
+                            } else {
+                                Some(matches)
+                            }
+                        })
+                    } else {
+                        None
+                    };
+
+                    let extracted_links = if extract_links {
+                        body_text.as_ref().map(|b| extract_links_from_body(b))
+                    } else {
+                        None
+                    };
+
+                    let security_headers = if check_security_headers {
+                        Some(analyze_security_headers(&resp.headers))
+                    } else {
+                        None
+                    };
+
+                    let detected_errors = if detect_errors {
+                        body_text.as_ref().and_then(|b| {
+                            let errors = detect_error_messages(b);
+                            if errors.is_empty() {
+                                None
+                            } else {
+                                Some(errors)
+                            }
+                        })
+                    } else {
+                        None
+                    };
+
+                    let reflection_detected = if detect_reflection {
+                        let reflection_marker = format!("terminus_test_{}", rand::random::<u64>());
+                        body_text.as_ref().map(|b| check_reflection(b, &reflection_marker))
+                    } else {
+                        None
+                    };
+
+                    let should_add = if grep_pattern.is_some() {
+                        matched_patterns.is_some()
+                    } else {
+                        true
+                    };
+
+                    let http2_desync = if http2_desync_check && full_url.starts_with("https") {
+                        let proxy_url_opt = proxy_url.as_deref();
+                        Some(perform_http2_desync_check(
+                            allow_insecure,
+                            &full_url,
+                            &method,
+                            &custom_headers,
+                            status,
+                            proxy_url_opt,
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    let host_injection = if detect_host_injection {
+                        Some(perform_host_injection_check(
+                            transport.as_ref(),
+                            &full_url,
+                            &method,
+                            &custom_headers,
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    let xff_bypass = if detect_xff_bypass {
+                        Some(perform_xff_bypass_check(
+                            transport.as_ref(),
+                            &full_url,
+                            &method,
+                            &custom_headers,
+                            status,
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    let csrf_result = if detect_csrf {
+                        Some(perform_csrf_check(
+                            transport.as_ref(),
+                            &full_url,
+                            &method,
+                            &custom_headers,
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    let ssrf_result = if detect_ssrf {
+                        Some(perform_ssrf_check(
+                            transport.as_ref(),
+                            &full_url,
+                            &method,
+                            &custom_headers,
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    if should_add {
+                        if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
+                            let temp_result = ScanResult {
                                 url: url.clone(),
                                 method: method.clone(),
                                 arbitrary_method_used: arbitrary_method_used.clone(),
-                                arbitrary_method_accepted: None,
-                                method_confusion_suspected: None,
-                                status: 0,
-                                port: *port,
-                                headers: None,
-                                error: Some(e.to_string()),
-                                body_preview: None,
-                                matched_patterns: None,
-                                extracted_links: None,
-                                security_headers: None,
-                                detected_errors: None,
-                                reflection_detected: None,
-                                http2_desync: None,
-                                host_injection: None,
-                                xff_bypass: None,
-                                csrf_result: None,
-                                ssrf_result: None,
+                                arbitrary_method_accepted,
+                                method_confusion_suspected,
+                                status,
+                                port,
+                                headers: headers_str.clone(),
+                                error: None,
+                                body_preview: body_preview.clone(),
+                                matched_patterns: matched_patterns.clone(),
+                                extracted_links: extracted_links.clone(),
+                                security_headers: security_headers.clone(),
+                                detected_errors: detected_errors.clone(),
+                                reflection_detected,
+                                http2_desync: http2_desync.clone(),
+                                host_injection: host_injection.clone(),
+                                xff_bypass: xff_bypass.clone(),
+                                csrf_result: csrf_result.clone(),
+                                ssrf_result: ssrf_result.clone(),
                                 request_headers: Some(request_headers_str.clone()),
-                                response_body: None,
-                            });
+                                response_body: response_body.clone(),
+                            };
+
+                            let vuln_indicators = collect_vuln_indicators(&temp_result);
+                            let indicators_str = if !vuln_indicators.is_empty() {
+                                format!(" {}", vuln_indicators.join(" "))
+                            } else {
+                                String::new()
+                            };
+
+                            if let Some(ref headers) = headers_str {
+                                println!("URL: {}, Method: {}, Status: {}, Port: {}, Headers: {}{}",
+                                    url, method, status, port, headers, indicators_str);
+                            } else {
+                                println!("URL: {}, Method: {}, Status: {}, Port: {}{}",
+                                    url, method, status, port, indicators_str);
+                            }
+                        }
+
+                        let mut results_guard = results.lock().await;
+                        results_guard.push(ScanResult {
+                            url: url.clone(),
+                            method: method.clone(),
+                            arbitrary_method_used: arbitrary_method_used.clone(),
+                            arbitrary_method_accepted,
+                            method_confusion_suspected,
+                            status,
+                            port,
+                            headers: headers_str.clone(),
+                            error: None,
+                            body_preview,
+                            matched_patterns,
+                            extracted_links,
+                            security_headers,
+                            detected_errors,
+                            reflection_detected,
+                            http2_desync,
+                            host_injection,
+                            xff_bypass,
+                            csrf_result,
+                            ssrf_result,
+                            request_headers: Some(request_headers_str.clone()),
+                            response_body,
+                        });
+                    }
+
+                    if follow_redirects {
+                        let mut redirect_url = extract_redirect_target(
+                            &full_url,
+                            &resp.headers,
+                            body_text.as_deref(),
+                        );
+                        let mut redirect_count = 0;
+                        let max_redirects = 10;
+
+                        while redirect_count < max_redirects {
+                            let Some(next_url) = redirect_url.take() else {
+                                break;
+                            };
+
+                            let request = build_request(&next_url, &method, &custom_headers);
+
+                            match transport.send(request).await {
+                                Ok(redirect_resp) => {
+                                    let redirect_status = redirect_resp.status;
+                                    let redirect_headers_str = if verbose {
+                                        Some(flatten_headers(&redirect_resp.headers))
+                                    } else {
+                                        None
+                                    };
+                                    let redirect_body = if redirect_resp.body.is_empty() {
+                                        None
+                                    } else {
+                                        Some(String::from_utf8_lossy(&redirect_resp.body).to_string())
+                                    };
+
+                                    let mut results_guard = results.lock().await;
+                                    results_guard.push(ScanResult {
+                                        url: next_url.clone(),
+                                        method: method.clone(),
+                                        arbitrary_method_used: arbitrary_method_used.clone(),
+                                        arbitrary_method_accepted,
+                                        method_confusion_suspected,
+                                        status: redirect_status,
+                                        port,
+                                        headers: redirect_headers_str,
+                                        error: None,
+                                        body_preview: None,
+                                        matched_patterns: None,
+                                        extracted_links: None,
+                                        security_headers: None,
+                                        detected_errors: None,
+                                        reflection_detected: None,
+                                        http2_desync: None,
+                                        host_injection: None,
+                                        xff_bypass: None,
+                                        csrf_result: None,
+                                        ssrf_result: None,
+                                        request_headers: Some(request_headers_str.clone()),
+                                        response_body: redirect_body.clone(),
+                                    });
+
+                                    redirect_url = extract_redirect_target(
+                                        &next_url,
+                                        &redirect_resp.headers,
+                                        redirect_body.as_deref(),
+                                    );
+                                    redirect_count += 1;
+                                }
+                                Err(_) => {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
-    });
+                Err(e) => {
+                    if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {
+                        eprintln!("Error on {}:{} using {}: {}", url, port, method, e);
+                    }
 
-    let final_results = results.lock().unwrap().clone();
+                    let mut results_guard = results.lock().await;
+                    results_guard.push(ScanResult {
+                        url: url.clone(),
+                        method: method.clone(),
+                        arbitrary_method_used: arbitrary_method_used.clone(),
+                        arbitrary_method_accepted: None,
+                        method_confusion_suspected: None,
+                        status: 0,
+                        port,
+                        headers: None,
+                        error: Some(e.to_string()),
+                        body_preview: None,
+                        matched_patterns: None,
+                        extracted_links: None,
+                        security_headers: None,
+                        detected_errors: None,
+                        reflection_detected: None,
+                        http2_desync: None,
+                        host_injection: None,
+                        xff_bypass: None,
+                        csrf_result: None,
+                        ssrf_result: None,
+                        request_headers: Some(request_headers_str.clone()),
+                        response_body: None,
+                    });
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    let final_results = results.lock().await.clone();
 
     if let Some(diff_file) = matches.get_one::<String>("diff") {
         let old_results = crate::diff::load_previous_scan(diff_file)?;

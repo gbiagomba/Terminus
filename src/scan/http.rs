@@ -1,7 +1,7 @@
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::Method;
 use std::str::FromStr;
+use url::Url;
+use http::header::{HeaderName, HeaderValue};
 
 pub fn build_full_url(url: &str, port: u16) -> String {
     if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
@@ -19,25 +19,24 @@ pub fn build_full_url(url: &str, port: u16) -> String {
     }
 }
 
-pub fn build_reqwest_method(method: &str) -> Method {
-    Method::from_bytes(method.as_bytes()).unwrap_or_else(|_| {
-        let sanitized: String = method
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        Method::from_bytes(sanitized.as_bytes()).unwrap_or(Method::GET)
-    })
+pub fn normalize_method(method: &str) -> String {
+    let trimmed = method.trim();
+    if trimmed.is_empty() {
+        return "GET".to_string();
+    }
+
+    trimmed.to_uppercase()
 }
 
-pub fn flatten_headers(headers: &HeaderMap) -> String {
+pub fn flatten_headers(headers: &[(String, String)]) -> String {
     headers
         .iter()
-        .map(|(k, v)| format!("{}:{}", k, v.to_str().unwrap_or("INVALID")))
+        .map(|(k, v)| format!("{}:{}", k, v))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-pub fn parse_header(header_str: &str) -> Option<(HeaderName, HeaderValue)> {
+pub fn parse_header(header_str: &str) -> Option<(String, String)> {
     let parts: Vec<&str> = header_str.splitn(2, ':').collect();
     if parts.len() != 2 {
         return None;
@@ -47,9 +46,35 @@ pub fn parse_header(header_str: &str) -> Option<(HeaderName, HeaderValue)> {
     let value = parts[1].trim();
 
     match (HeaderName::from_str(key), HeaderValue::from_str(value)) {
-        (Ok(name), Ok(val)) => Some((name, val)),
+        (Ok(_), Ok(_)) => Some((key.to_string(), value.to_string())),
         _ => None,
     }
+}
+
+pub fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+pub fn upsert_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let mut replaced = false;
+    for (key, val) in headers.iter_mut() {
+        if key.eq_ignore_ascii_case(name) {
+            *val = value.to_string();
+            replaced = true;
+            break;
+        }
+    }
+
+    if !replaced {
+        headers.push((name.to_string(), value.to_string()));
+    }
+}
+
+pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
+    headers.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
 }
 
 pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<String> {
@@ -58,11 +83,11 @@ pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<
         return None;
     }
 
-    if let Ok(parsed) = reqwest::Url::parse(trimmed) {
+    if let Ok(parsed) = Url::parse(trimmed) {
         return Some(parsed.to_string());
     }
 
-    reqwest::Url::parse(base_url)
+    Url::parse(base_url)
         .ok()
         .and_then(|base| base.join(trimmed).ok())
         .map(|url| url.to_string())
@@ -90,14 +115,12 @@ pub fn extract_js_redirect_target(body: &str) -> Option<String> {
 
 pub fn extract_redirect_target(
     base_url: &str,
-    headers: &HeaderMap,
+    headers: &[(String, String)],
     response_body: Option<&str>,
 ) -> Option<String> {
-    if let Some(location) = headers.get(reqwest::header::LOCATION) {
-        if let Ok(location_str) = location.to_str() {
-            if let Some(resolved) = resolve_redirect_target(base_url, location_str) {
-                return Some(resolved);
-            }
+    if let Some(location) = header_value(headers, "location") {
+        if let Some(resolved) = resolve_redirect_target(base_url, location) {
+            return Some(resolved);
         }
     }
 
@@ -126,7 +149,7 @@ mod tests {
 
     #[test]
     fn resolves_relative_js_redirect_against_base_url() {
-        let headers = HeaderMap::new();
+        let headers = Vec::new();
         let redirect = extract_redirect_target(
             "https://example.com/app/index.html",
             &headers,
@@ -138,11 +161,7 @@ mod tests {
 
     #[test]
     fn prefers_location_header_over_js_redirect() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            reqwest::header::LOCATION,
-            HeaderValue::from_static("/http-redirect"),
-        );
+        let headers = vec![("Location".to_string(), "/http-redirect".to_string())];
 
         let redirect = extract_redirect_target(
             "https://example.com/start",

@@ -3,7 +3,7 @@ use clap::{Arg, ArgAction, Command};
 pub fn build_cli() -> Command {
     Command::new("Terminus")
         .disable_version_flag(true)
-        .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and multi-threaded scanning")
+        .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and concurrent scanning")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(scan_subcommand())
@@ -36,7 +36,7 @@ fn scan_subcommand() -> Command {
         .arg(Arg::new("header-file").long("header-file").value_name("FILE").help("Read headers from file (one per line, format: 'Name: Value')"))
         .arg(Arg::new("cookie").short('b').long("cookie").value_name("COOKIE").help("Add cookie string (format: 'name1=value1; name2=value2')"))
         .arg(Arg::new("cookie-file").short('c').long("cookie-file").value_name("FILE").help("Read cookies from file"))
-        .arg(Arg::new("http-version").long("http-version").value_name("VERSION").help("Force HTTP version (1.0, 1.1, or 2)"))
+        .arg(Arg::new("http-version").long("http-version").value_name("VERSION").help("Force HTTP version (1.0, 1.1, 2, or 3)"))
         .arg(Arg::new("diff").long("diff").value_name("FILE").help("Compare results with previous scan (JSON file)"))
         .arg(Arg::new("grep-response").long("grep-response").value_name("PATTERN").help("Search for pattern in response body (regex supported)"))
         .arg(Arg::new("rate-limit").long("rate-limit").value_name("RATE").help("Rate limit requests (e.g., '10/s', '100/m')"))
