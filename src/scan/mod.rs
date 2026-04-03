@@ -1,0 +1,21 @@
+pub mod analysis;
+pub mod engine;
+pub mod exploits;
+pub mod http;
+pub mod input;
+
+pub use engine::run_scan;
+
+pub const HTTP_METHODS: &[&str] = &[
+    "ACL", "ARBITRARY", "BASELINE-CONTROL", "BCOPY", "BDELETE", "BIND", "BMOVE", "BPROPFIND",
+    "BPROPPATCH", "CHECKIN", "CHECKOUT", "CONNECT", "COPY", "DEBUG", "DELETE", "GET", "HEAD",
+    "INDEX", "LABEL", "LINK", "LOCK", "MERGE", "MKACTIVITY", "MKCALENDAR", "MKCOL",
+    "MKREDIRECTREF", "MKWORKSPACE", "MOVE", "NOTIFY", "OPTIONS", "ORDERPATCH", "PATCH", "POLL",
+    "POST", "PROPFIND", "PROPPATCH", "PUT", "REBIND", "REPORT", "RPC_IN_DATA", "RPC_OUT_DATA",
+    "SEARCH", "SUBSCRIBE", "TRACE", "TRACK", "UNBIND", "UNCHECKOUT", "UNLINK", "UNLOCK",
+    "UNSUBSCRIBE", "UPDATE", "UPDATEREDIRECTREF", "VERSION-CONTROL", "X-MS-ENUMATTS"
+];
+
+pub const ARBITRARY_HTTP_METHODS: &[&str] = &[
+    "BILBAO", "FOOBAR", "CATS", "TERMINUS", "PUZZLE", "HELLO"
+];

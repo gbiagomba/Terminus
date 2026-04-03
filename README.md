@@ -70,7 +70,7 @@
   - Supports both `sqlite` and `db` format names
   - Full response bodies and headers preserved for deep analysis
   - Includes `arbitrary_method_used` column for fuzzed methods
-  - Optional interactive query shell via `--db-interactive`
+  - Optional interactive query shell via `terminus interact --db <SQLITE_FILE>`
 
 ### HTTP Testing
 - **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
@@ -133,7 +133,7 @@
 - **Custom Methods**: Add methods via `--custom-method` or `--custom-methods-file`
 
 ### Interactive SQLite Mode (v2.12.0)
-- **REPL for SQLite**: Use `--db-interactive <SQLITE_FILE>` to explore a Terminus DB without arbitrary SQL
+- **REPL for SQLite**: Use `terminus interact --db <SQLITE_FILE>` to explore a Terminus DB without arbitrary SQL
 - **Safe Commands**: `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
 - **Pagination**: 20-row pages with `--more` support
 
@@ -224,9 +224,17 @@ cargo install --path .
 ```plaintext
 URL testing with support for multiple input formats (nmap, testssl, ProjectDiscovery), IPv4/IPv6, and various output formats
 
-Usage: terminus [OPTIONS]
+Usage: terminus <SUBCOMMAND> [OPTIONS]
 
-Options:
+Subcommands:
+  scan        Primary HTTP scanning engine
+  diff        Compare two scan outputs (JSON)
+  interact    Interactive SQLite review mode
+  help        Manual-style help
+  enum        Enumeration commands (planned)
+  ai          AI decision-support commands (planned)
+
+Scan options:
   -u, --url <URL>                  Specify a single URL/IP to check
   -f, --file <FILE>                Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)
   -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use ALL to test all methods
@@ -263,7 +271,6 @@ Options:
       --fuzz-methods               Enable arbitrary HTTP method fuzzing
       --custom-method <METHOD>     Add one or more arbitrary HTTP methods for fuzzing (can be specified multiple times)
       --custom-methods-file <FILE> Load arbitrary HTTP methods from a file (one per line)
-      --db-interactive <SQLITE_FILE> Open an interactive shell for a Terminus SQLite database
   -h, --help                       Print help
   -V, --version                    Print version
 
@@ -275,32 +282,32 @@ Options:
 
 **Test a single URL (scans both port 80 and 443 by default)**:
 ```bash
-terminus -u http://example.com
+terminus scan -u http://example.com
 ```
 
 **Test an IPv4 address (scans ports 80 and 443)**:
 ```bash
-terminus -u 192.168.1.1
+terminus scan -u 192.168.1.1
 ```
 
 **Test an IPv6 address**:
 ```bash
-terminus -u "2001:db8::1" -6
+terminus scan -u "2001:db8::1" -6
 ```
 
 **Test with custom ports**:
 ```bash
-terminus -u http://example.com -p 8080,8443
+terminus scan -u http://example.com -p 8080,8443
 ```
 
 **Test multiple URLs from a file**:
 ```bash
-terminus -f urls.txt -X ALL
+terminus scan -f urls.txt -X ALL
 ```
 
 **Test specific ports only**:
 ```bash
-terminus -f urls.txt -p 80,443,8080 -X ALL
+terminus scan -f urls.txt -p 80,443,8080 -X ALL
 ```
 
 #### Input Format Examples
@@ -308,25 +315,25 @@ terminus -f urls.txt -p 80,443,8080 -X ALL
 **Parse nmap XML output (uses ports from nmap scan)**:
 ```bash
 nmap -p80,443,8080 -oX scan.xml target.com
-terminus -f scan.xml
+terminus scan -f scan.xml
 ```
 
 **Parse nmap greppable output (uses ports from nmap scan)**:
 ```bash
 nmap -p80,443 -oG scan.gnmap target.com
-terminus -f scan.gnmap
+terminus scan -f scan.gnmap
 ```
 
 **Parse testssl.sh JSON output (uses ports from testssl scan)**:
 ```bash
 testssl --json-pretty target.com > testssl.json
-terminus -f testssl.json
+terminus scan -f testssl.json
 ```
 
 **Parse ProjectDiscovery tool output (uses discovered URLs with ports)**:
 ```bash
 echo "target.com" | katana -json -o katana.json
-terminus -f katana.json
+terminus scan -f katana.json
 ```
 
 **Note**: When using file inputs, Terminus automatically uses the ports specified in the scan output. No `-p` flag needed!
@@ -352,23 +359,23 @@ subfinder -d target.com -silent | httprobe | terminus --output-format json -o re
 
 **Output to JSON**:
 ```bash
-terminus -u http://example.com --output-format json -o scan_results
+terminus scan -u http://example.com --output-format json -o scan_results
 ```
 
 **Output to HTML**:
 ```bash
-terminus -f urls.txt --output-format html -o scan_results
+terminus scan -f urls.txt --output-format html -o scan_results
 ```
 
 **Output to CSV**:
 ```bash
-terminus -f urls.txt --output-format csv -o scan_results
+terminus scan -f urls.txt --output-format csv -o scan_results
 ```
 
 **Output to SQLite database**:
 ```bash
 # Basic SQLite export
-terminus -f urls.txt --output-format sqlite -o scan_results
+terminus scan -f urls.txt --output-format sqlite -o scan_results
 
 # Query the database with standard SQL
 sqlite3 scan_results.db "SELECT url, status, port FROM scan_results WHERE status >= 400;"
@@ -384,48 +391,48 @@ sqlite3 scan_results.db "SELECT url, method FROM scan_results WHERE
 sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results;" > filtered_results.csv
 
 # Can also use 'db' as format name
-terminus -f urls.txt --output-format db -o scan_results
+terminus scan -f urls.txt --output-format db -o scan_results
 
 # Interactive query shell
-terminus --db-interactive scan_results.db
+terminus interact --db scan_results.db
 ```
 
 **Output to all formats**:
 ```bash
 # Creates .txt, .json, .html, .csv, and .db files
-terminus -f urls.txt --output-format all -o scan_results
+terminus scan -f urls.txt --output-format all -o scan_results
 ```
 
 #### Advanced Examples
 
 **Test with proxy (Burp Suite)**:
 ```bash
-terminus -u https://example.com -x http://127.0.0.1:8080 -k
+terminus scan -u https://example.com -x http://127.0.0.1:8080 -k
 ```
 
 **Follow JavaScript-triggered redirects**:
 ```bash
-terminus -u https://example.com/login -L
+terminus scan -u https://example.com/login -L
 ```
 
 **Test with custom headers**:
 ```bash
-terminus -u https://example.com -H "Authorization: Bearer token123" -H "X-Custom: value"
+terminus scan -u https://example.com -H "Authorization: Bearer token123" -H "X-Custom: value"
 ```
 
 **Test with cookies**:
 ```bash
-terminus -u https://example.com -b "session=abc123; user=admin"
+terminus scan -u https://example.com -b "session=abc123; user=admin"
 ```
 
 **Force HTTP/2**:
 ```bash
-terminus -u https://example.com --http-version 2
+terminus scan -u https://example.com --http-version 2
 ```
 
 **Complete pentest workflow**:
 ```bash
-terminus -u https://api.example.com -X POST \
+terminus scan -u https://api.example.com -X POST \
   -H "Content-Type: application/json" \
   -b "session=xyz789" \
   -x http://127.0.0.1:8080 \
@@ -438,45 +445,45 @@ terminus -u https://api.example.com -X POST \
 **Scan Level Preset Examples**:
 ```bash
 # Quick scan - basic requests only (fastest)
-terminus -f urls.txt --scan-level quick
+terminus scan -f urls.txt --scan-level quick
 
 # Standard scan - security headers, errors, and reflection detection
-terminus -f production_urls.txt --scan-level standard -o standard_scan
+terminus scan -f production_urls.txt --scan-level standard -o standard_scan
 
 # Full scan - all features including body analysis
-terminus -f targets.txt --scan-level full --rate-limit 10/s -o full_scan
+terminus scan -f targets.txt --scan-level full --rate-limit 10/s -o full_scan
 
 # Vulnerability scan - all passive vulnerability detection
-terminus -f api_endpoints.txt --scan-level vuln -k -o vuln_scan
+terminus scan -f api_endpoints.txt --scan-level vuln -k -o vuln_scan
 
 # Override preset with individual flags
-terminus -f urls.txt --scan-level standard --detect-host-injection -o custom_scan
+terminus scan -f urls.txt --scan-level standard --detect-host-injection -o custom_scan
 
 # Combine preset with other flags
-terminus -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
+terminus scan -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
 ```
 
 #### Arbitrary Method Fuzzing Examples (v2.12.0)
 
 **Fuzz predefined arbitrary methods**:
 ```bash
-terminus -u https://example.com --fuzz-methods -k
+terminus scan -u https://example.com --fuzz-methods -k
 ```
 
 **Add custom arbitrary methods**:
 ```bash
-terminus -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-method SPLAT -k
+terminus scan -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-method SPLAT -k
 ```
 
 **Load methods from file**:
 ```bash
-terminus -u https://example.com --fuzz-methods --custom-methods-file methods.txt -k
+terminus scan -u https://example.com --fuzz-methods --custom-methods-file methods.txt -k
 ```
 
 #### Interactive SQLite Examples (v2.12.0)
 
 ```bash
-terminus --db-interactive scan_results.db
+terminus interact --db scan_results.db
 
 terminus> list urls
 terminus> find status 403
@@ -490,19 +497,19 @@ terminus> exit
 **Concurrent Scanning with Threading**:
 ```bash
 # Fast scan with 20 concurrent threads
-terminus -f large_url_list.txt -t 20 -o fast_scan
+terminus scan -f large_url_list.txt -t 20 -o fast_scan
 
 # Balanced scanning with 10 threads (default)
-terminus -f urls.txt --scan-level vuln -o balanced_scan
+terminus scan -f urls.txt --scan-level vuln -o balanced_scan
 
 # Conservative scanning with 5 threads for production
-terminus -f production_endpoints.txt -t 5 --rate-limit 10/s -o conservative_scan
+terminus scan -f production_endpoints.txt -t 5 --rate-limit 10/s -o conservative_scan
 
 # Maximum speed scan with 50 threads
-terminus -f urls.txt -t 50 --output-format all -o speed_scan
+terminus scan -f urls.txt -t 50 --output-format all -o speed_scan
 
 # Thread control with vulnerability detection
-terminus -f targets.txt \
+terminus scan -f targets.txt \
   -t 15 \
   --scan-level vuln \
   --rate-limit 20/s \
@@ -515,55 +522,58 @@ terminus -f targets.txt \
 **Compare two scans to identify changes**:
 ```bash
 # First scan
-terminus -f targets.txt --output-format json -o scan1
+terminus scan -f targets.txt --output-format json -o scan1
 
 # Second scan (after changes)
-terminus -f targets.txt --output-format json -o scan2
+terminus scan -f targets.txt --output-format json -o scan2
 
 # Compare scans
-terminus -f targets.txt --diff scan1.json -o scan2
+terminus scan -f targets.txt --diff scan1.json -o scan2
+
+# Or use the diff subcommand directly
+terminus diff --base scan1.json --compare scan2.json
 ```
 
 **Search for sensitive patterns in responses**:
 ```bash
 # Find admin panels or config files
-terminus -f urls.txt --grep-response "admin|backup|config|\.env"
+terminus scan -f urls.txt --grep-response "admin|backup|config|\.env"
 
 # Find API keys or tokens
-terminus -f api_endpoints.txt --grep-response "[Aa]pi[_-]?[Kk]ey|[Tt]oken|[Ss]ecret"
+terminus scan -f api_endpoints.txt --grep-response "[Aa]pi[_-]?[Kk]ey|[Tt]oken|[Ss]ecret"
 
 # Search for specific error messages
-terminus -f urls.txt --grep-response "SQL syntax|mysql_fetch|ORA-[0-9]+"
+terminus scan -f urls.txt --grep-response "SQL syntax|mysql_fetch|ORA-[0-9]+"
 ```
 
 **Rate-limited scanning for production environments**:
 ```bash
 # 10 requests per second
-terminus -f production_urls.txt --rate-limit 10/s
+terminus scan -f production_urls.txt --rate-limit 10/s
 
 # 100 requests per minute
-terminus -f large_list.txt --rate-limit 100/m
+terminus scan -f large_list.txt --rate-limit 100/m
 
 # Combine with random delays for stealth
-terminus -f targets.txt --rate-limit 5/s --random-delay 1-3
+terminus scan -f targets.txt --rate-limit 5/s --random-delay 1-3
 ```
 
 **Analyze response bodies and extract links**:
 ```bash
 # Check response body content
-terminus -u https://example.com --check-body -v
+terminus scan -u https://example.com --check-body -v
 
 # Extract all links from response
-terminus -u https://example.com --extract-links
+terminus scan -u https://example.com --extract-links
 
 # Combine with grep for specific content
-terminus -f urls.txt --check-body --grep-response "password|credential" -o findings
+terminus scan -f urls.txt --check-body --grep-response "password|credential" -o findings
 ```
 
 **Advanced reconnaissance workflow**:
 ```bash
 # Scan with body analysis and link extraction
-terminus -f targets.txt \
+terminus scan -f targets.txt \
   --check-body \
   --extract-links \
   --grep-response "api|v[0-9]|admin" \
@@ -572,7 +582,7 @@ terminus -f targets.txt \
   -o recon_results
 
 # Compare with previous scan
-terminus -f targets.txt \
+terminus scan -f targets.txt \
   --diff recon_results.json \
   --check-body \
   -o new_scan
@@ -583,37 +593,37 @@ terminus -f targets.txt \
 **Analyze security headers**:
 ```bash
 # Check for missing or misconfigured security headers
-terminus -f production_urls.txt --check-security-headers -o security_audit
+terminus scan -f production_urls.txt --check-security-headers -o security_audit
 
 # Combine with JSON output for detailed analysis
-terminus -u https://example.com --check-security-headers --output-format json -o headers_check
+terminus scan -u https://example.com --check-security-headers --output-format json -o headers_check
 ```
 
 **Detect verbose error messages**:
 ```bash
 # Scan for SQL errors, stack traces, and debug information
-terminus -f urls.txt --detect-errors
+terminus scan -f urls.txt --detect-errors
 
 # Find specific error types with grep
-terminus -f api_endpoints.txt --detect-errors --grep-response "SQL|Exception|Traceback"
+terminus scan -f api_endpoints.txt --detect-errors --grep-response "SQL|Exception|Traceback"
 
 # Export error findings to CSV for reporting
-terminus -f targets.txt --detect-errors --output-format csv -o error_findings
+terminus scan -f targets.txt --detect-errors --output-format csv -o error_findings
 ```
 
 **Passive reflection detection (XSS indicators)**:
 ```bash
 # Check for potential XSS vectors without exploitation
-terminus -f forms_urls.txt --detect-reflection
+terminus scan -f forms_urls.txt --detect-reflection
 
 # Combine with error detection for comprehensive analysis
-terminus -u https://webapp.com/search --detect-reflection --detect-errors -v
+terminus scan -u https://webapp.com/search --detect-reflection --detect-errors -v
 ```
 
 **Comprehensive security audit workflow**:
 ```bash
 # Full passive security assessment
-terminus -f target_list.txt \
+terminus scan -f target_list.txt \
   --check-security-headers \
   --detect-errors \
   --detect-reflection \
@@ -633,7 +643,7 @@ python athena.py security_assessment.json \
 **Enterprise security scanning**:
 ```bash
 # Respectful production scanning with all security checks
-terminus -f production_endpoints.txt \
+terminus scan -f production_endpoints.txt \
   --check-security-headers \
   --detect-errors \
   --detect-reflection \
@@ -644,7 +654,7 @@ terminus -f production_endpoints.txt \
   -o prod_security_scan
 
 # Compare with baseline
-terminus -f production_endpoints.txt \
+terminus scan -f production_endpoints.txt \
   --check-security-headers \
   --detect-errors \
   --diff prod_security_scan.json \
@@ -656,16 +666,16 @@ terminus -f production_endpoints.txt \
 **Test HTTP/2 to HTTP/1.1 downgrade handling**:
 ```bash
 # Basic HTTP/2 desync check on a single target
-terminus -u https://api.example.com --http2-desync-check -k
+terminus scan -u https://api.example.com --http2-desync-check -k
 
 # Check multiple endpoints for desync vulnerabilities
-terminus -f https_endpoints.txt --http2-desync-check --output-format json -o desync_scan
+terminus scan -f https_endpoints.txt --http2-desync-check --output-format json -o desync_scan
 ```
 
 **Detect request smuggling vectors**:
 ```bash
 # Test for HTTP/2 downgrade issues with specific HTTP methods
-terminus -u https://target.com/api/endpoint \
+terminus scan -u https://target.com/api/endpoint \
   -X POST \
   --http2-desync-check \
   -k \
@@ -673,7 +683,7 @@ terminus -u https://target.com/api/endpoint \
   -o smuggling_test
 
 # Test multiple methods for desync vulnerabilities
-terminus -u https://api.target.com \
+terminus scan -u https://api.target.com \
   -X ALL \
   --http2-desync-check \
   --rate-limit 5/s \
@@ -684,7 +694,7 @@ terminus -u https://api.target.com \
 **Combine with other security checks**:
 ```bash
 # Comprehensive HTTP/2 security assessment
-terminus -f production_apis.txt \
+terminus scan -f production_apis.txt \
   --http2-desync-check \
   --check-security-headers \
   --detect-errors \
@@ -695,7 +705,7 @@ terminus -f production_apis.txt \
   -o http2_security_audit
 
 # Proxy through Burp Suite for manual analysis
-terminus -u https://target.com/vulnerable/endpoint \
+terminus scan -u https://target.com/vulnerable/endpoint \
   --http2-desync-check \
   -x http://127.0.0.1:8080 \
   -k \
@@ -707,7 +717,7 @@ terminus -u https://target.com/vulnerable/endpoint \
 **Enterprise CDN/proxy testing**:
 ```bash
 # Test CDN endpoints for HTTP/2 downgrade issues
-terminus -f cdn_endpoints.txt \
+terminus scan -f cdn_endpoints.txt \
   --http2-desync-check \
   --rate-limit 5/s \
   --random-delay 2-4 \
@@ -716,14 +726,14 @@ terminus -f cdn_endpoints.txt \
   -o cdn_desync_scan
 
 # Compare desync results over time
-terminus -f api_endpoints.txt \
+terminus scan -f api_endpoints.txt \
   --http2-desync-check \
   --diff previous_desync_scan.json \
   -k \
   -o latest_desync_scan
 
 # Test with custom headers to bypass WAF/CDN
-terminus -u https://target.com/api \
+terminus scan -u https://target.com/api \
   --http2-desync-check \
   -H "X-Forwarded-For: 127.0.0.1" \
   -H "User-Agent: Mozilla/5.0" \
@@ -736,7 +746,7 @@ terminus -u https://target.com/api \
 ```bash
 # Full HTTP/2 desync assessment pipeline
 echo "target.com" | httpx -silent | \
-terminus --http2-desync-check \
+terminus scan --http2-desync-check \
   --check-security-headers \
   --detect-errors \
   --rate-limit 10/s \
@@ -756,13 +766,13 @@ python athena.py desync_findings.json \
 **Test for Host Header Injection**:
 ```bash
 # Basic Host header injection detection
-terminus -u https://example.com --detect-host-injection -k
+terminus scan -u https://example.com --detect-host-injection -k
 
 # Test multiple endpoints for host injection
-terminus -f endpoints.txt --detect-host-injection --output-format json -o host_injection_scan
+terminus scan -f endpoints.txt --detect-host-injection --output-format json -o host_injection_scan
 
 # Combine with verbose output to see response headers
-terminus -u https://target.com/api \
+terminus scan -u https://target.com/api \
   --detect-host-injection \
   -v \
   -k \
@@ -773,17 +783,17 @@ terminus -u https://target.com/api \
 **Detect X-Forwarded-For Bypasses**:
 ```bash
 # Check for XFF bypass on protected endpoints
-terminus -u https://admin.example.com --detect-xff-bypass -k
+terminus scan -u https://admin.example.com --detect-xff-bypass -k
 
 # Test multiple protected paths
-terminus -f admin_endpoints.txt \
+terminus scan -f admin_endpoints.txt \
   --detect-xff-bypass \
   --rate-limit 5/s \
   --output-format json \
   -o xff_bypass_scan
 
 # Test with different HTTP methods
-terminus -u https://api.target.com/admin \
+terminus scan -u https://api.target.com/admin \
   -X ALL \
   --detect-xff-bypass \
   -k \
@@ -794,17 +804,17 @@ terminus -u https://api.target.com/admin \
 **Detect CSRF Vulnerabilities**:
 ```bash
 # Test for CSRF on state-changing endpoints
-terminus -u https://example.com/api/update -X POST --detect-csrf -k
+terminus scan -u https://example.com/api/update -X POST --detect-csrf -k
 
 # Scan multiple POST/PUT/DELETE endpoints
-terminus -f state_changing_endpoints.txt \
+terminus scan -f state_changing_endpoints.txt \
   -X POST \
   --detect-csrf \
   --output-format json \
   -o csrf_scan
 
 # Comprehensive CSRF testing with all methods
-terminus -f api_endpoints.txt \
+terminus scan -f api_endpoints.txt \
   -X ALL \
   --detect-csrf \
   --rate-limit 10/s \
@@ -816,16 +826,16 @@ terminus -f api_endpoints.txt \
 **Detect SSRF Vulnerabilities**:
 ```bash
 # Test endpoints with URL parameters for SSRF
-terminus -u "https://example.com/proxy?url=http://internal" --detect-ssrf -k
+terminus scan -u "https://example.com/proxy?url=http://internal" --detect-ssrf -k
 
 # Scan endpoints that might be vulnerable to SSRF
-terminus -f urls_with_params.txt \
+terminus scan -f urls_with_params.txt \
   --detect-ssrf \
   --output-format json \
   -o ssrf_scan
 
 # Test API endpoints for SSRF indicators
-terminus -f api_endpoints.txt \
+terminus scan -f api_endpoints.txt \
   --detect-ssrf \
   --check-body \
   --rate-limit 5/s \
@@ -837,7 +847,7 @@ terminus -f api_endpoints.txt \
 **Comprehensive Vulnerability Assessment**:
 ```bash
 # Full passive vulnerability scan with all v2.8.0 features
-terminus -f target_list.txt \
+terminus scan -f target_list.txt \
   --detect-host-injection \
   --detect-xff-bypass \
   --detect-csrf \
@@ -861,7 +871,7 @@ python athena.py comprehensive_vuln_scan.json \
 **Enterprise Security Testing Workflow**:
 ```bash
 # Stage 1: Reconnaissance with all detection features
-terminus -f production_apps.txt \
+terminus scan -f production_apps.txt \
   --detect-host-injection \
   --detect-xff-bypass \
   --detect-csrf \
@@ -884,7 +894,7 @@ python athena.py enterprise_scan_stage1.json \
   -o security_findings.txt
 
 # Stage 3: Compare with previous scan
-terminus -f production_apps.txt \
+terminus scan -f production_apps.txt \
   --detect-host-injection \
   --detect-xff-bypass \
   --detect-csrf \
@@ -897,7 +907,7 @@ terminus -f production_apps.txt \
 **Targeted Testing Examples**:
 ```bash
 # Test only for bypass techniques (XFF and Host Injection)
-terminus -f protected_endpoints.txt \
+terminus scan -f protected_endpoints.txt \
   --detect-host-injection \
   --detect-xff-bypass \
   -k \
@@ -905,7 +915,7 @@ terminus -f protected_endpoints.txt \
   -o bypass_techniques_scan
 
 # Test only for injection vulnerabilities (CSRF and SSRF)
-terminus -f api_endpoints.txt \
+terminus scan -f api_endpoints.txt \
   -X POST \
   --detect-csrf \
   --detect-ssrf \
@@ -915,7 +925,7 @@ terminus -f api_endpoints.txt \
   -o injection_vulns_scan
 
 # Proxy through Burp for manual review
-terminus -u https://target.com/vulnerable/endpoint \
+terminus scan -u https://target.com/vulnerable/endpoint \
   --detect-host-injection \
   --detect-xff-bypass \
   --detect-csrf \

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-04-03
+
+### Added
+- **Subcommand CLI**: New top-level subcommands: `scan`, `diff`, `interact`, `help`, `enum`, `ai`
+- **Modular Scan Engine**: Scan logic moved into dedicated `src/scan/` modules
+- **Diff Subcommand**: JSON scan comparison via `terminus diff --base <FILE> --compare <FILE>`
+- **Interact Subcommand**: SQLite review via `terminus interact --db <FILE>`
+- **Shared Output and Storage**: Output formatting in `src/output/` and SQLite persistence in `src/storage/`
+
+### Changed
+- **Version**: Bumped from 2.13.0 to 3.0.0
+- **CLI Usage**: All scan operations now live under `terminus scan`
+
+### Notes
+- `help`, `enum`, and `ai` are wired as subcommands with placeholder messaging in this phase.
+
 ## [2.13.0] - 2026-03-14
 
 ### Added
