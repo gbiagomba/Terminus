@@ -21,7 +21,7 @@ SUBCOMMANDS
   diff        Deterministic scan diffing
   interact    SQLite review mode
   help        Manual-style help
-  ai          AI decision support (planned)
+  ai          AI decision support
 
 EXAMPLES
   terminus scan -u https://example.com
@@ -29,6 +29,7 @@ EXAMPLES
   terminus enum paths -u https://example.com -w common.txt
   terminus diff --base old.json --compare new.json
   terminus interact --db scan.db
+  terminus ai prioritize --db scan.db --provider openai --model gpt-4o
 
 NOTES
   Use `terminus help <subcommand>` for focused documentation.
@@ -128,5 +129,8 @@ DESCRIPTION
   AI decision support over structured evidence. Modes include prioritize,
   cluster, diff, validate, and campaign. AI is evidence-driven; raw data is
   minimized and validated with deterministic extraction and correlation.
+
+EXAMPLE
+  terminus ai prioritize --db scan.db --provider openai --model gpt-4o
 "#.to_string()
 }

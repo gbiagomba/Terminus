@@ -5,6 +5,7 @@ use crate::models::ScanResult;
 use crate::r#enum::paths::EnumResult as PathEnumResult;
 use crate::r#enum::subdomains::EnumResult as SubdomainEnumResult;
 use crate::diff::DiffReport;
+use crate::ai::types::ReasoningResult;
 
 const SCHEMA_VERSION: i32 = 2;
 
@@ -232,6 +233,20 @@ pub fn output_diff_sqlite(diff: &DiffReport, output_base: Option<&str>, base_id:
     )?;
 
     eprintln!("Results written to {} (1 record)", filename);
+    Ok(())
+}
+
+pub fn output_ai_assessment(db_path: &str, provider: &str, model: &str, result: &ReasoningResult) -> Result<()> {
+    let conn = Connection::open(db_path)
+        .context(format!("Failed to open SQLite database: {}", db_path))?;
+    ensure_sqlite_schema(&conn)?;
+
+    let json = serde_json::to_string(result).unwrap_or_default();
+    conn.execute(
+        "INSERT INTO ai_assessments (scan_id, provider, model, assessment_json) VALUES (?1, ?2, ?3, ?4)",
+        params![db_path, provider, model, json],
+    )?;
+
     Ok(())
 }
 

@@ -208,3 +208,45 @@ fn hash_string(value: &str) -> String {
     let digest = hasher.finalize();
     hex::encode(digest)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ScanResult;
+
+    fn sample(url: &str, status: u16) -> ScanResult {
+        ScanResult {
+            url: url.to_string(),
+            method: "GET".to_string(),
+            arbitrary_method_used: None,
+            arbitrary_method_accepted: None,
+            method_confusion_suspected: None,
+            status,
+            port: 443,
+            headers: None,
+            error: None,
+            body_preview: None,
+            matched_patterns: None,
+            extracted_links: None,
+            security_headers: None,
+            detected_errors: None,
+            reflection_detected: None,
+            http2_desync: None,
+            host_injection: None,
+            xff_bypass: None,
+            csrf_result: None,
+            ssrf_result: None,
+            request_headers: None,
+            response_body: None,
+        }
+    }
+
+    #[test]
+    fn detects_status_changes() {
+        let old = vec![sample("https://example.com", 200)];
+        let new = vec![sample("https://example.com", 404)];
+        let report = compute_diff_inline(&old, &new);
+        assert_eq!(report.changed_endpoints.len(), 1);
+        assert!(report.changed_endpoints[0].status_changed);
+    }
+}

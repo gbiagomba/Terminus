@@ -258,8 +258,8 @@ Subcommands:
   diff        Compare two scan outputs (JSON)
   interact    Interactive SQLite review mode
   help        Manual-style help
-  enum        Enumeration commands (planned)
-  ai          AI decision-support commands (planned)
+  enum        Enumeration commands
+  ai          AI decision-support commands
 
 Scan options:
   -u, --url <URL>                  Specify a single URL/IP to check
@@ -278,7 +278,7 @@ Scan options:
       --header-file <FILE>         Read headers from file (one per line, format: 'Name: Value')
   -b, --cookie <COOKIE>            Add cookie string (format: 'name1=value1; name2=value2')
   -c, --cookie-file <FILE>         Read cookies from file
-      --http-version <VERSION>     Force HTTP version (1.0, 1.1, or 2)
+      --http-version <VERSION>     Force HTTP version (1.0, 1.1, 2, or 3)
       --diff <FILE>                Compare results with previous scan (JSON file)
       --grep-response <PATTERN>    Search for pattern in response body (regex supported)
       --rate-limit <RATE>          Rate limit requests (e.g., '10/s', '100/m')
@@ -966,7 +966,19 @@ terminus scan -u https://target.com/vulnerable/endpoint \
 
 ## AI-Powered Analysis
 
-Terminus includes a companion Python script for AI-powered analysis of scan results using multiple AI providers.
+Terminus includes a built-in Rust AI pipeline for SQLite evidence and an optional companion Python script for JSON scan analysis.
+
+### Built-in AI Subcommand (v3.5.0)
+Use the Rust AI pipeline to reason over SQLite evidence:
+
+```bash
+terminus ai prioritize --db scan.db --provider openai --model gpt-4o
+```
+
+Providers: `openai`, `openai-compatible` (via `OPENAI_BASE_URL`), `anthropic`, `gemini`, `cohere`.
+
+### Companion Python Script (Optional)
+The `athena.py` script analyzes JSON outputs when you prefer a standalone post-processing workflow.
 
 ### Features
 - **Local AI Providers**: Ollama, LM Studio, vLLM

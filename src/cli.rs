@@ -86,6 +86,23 @@ fn enum_subcommand() -> Command {
 fn ai_subcommand() -> Command {
     Command::new("ai")
         .about("AI decision-support commands")
+        .subcommand(ai_mode("prioritize"))
+        .subcommand(ai_mode("cluster"))
+        .subcommand(ai_mode("diff"))
+        .subcommand(ai_mode("validate"))
+        .subcommand(ai_mode("campaign"))
+}
+
+fn ai_mode(name: &'static str) -> Command {
+    Command::new(name)
+        .about("AI mode")
+        .arg(Arg::new("db").long("db").value_name("SQLITE_FILE").required(true).help("Terminus SQLite database file"))
+        .arg(Arg::new("provider").long("provider").value_name("PROVIDER").help("openai, openai-compatible, anthropic, gemini, cohere"))
+        .arg(Arg::new("model").long("model").value_name("MODEL").help("LLM model name"))
+        .arg(Arg::new("base-url").long("base-url").value_name("URL").help("Override provider base URL (OpenAI compatible)"))
+        .arg(Arg::new("max-findings").long("max-findings").value_name("NUM").help("Maximum findings to return"))
+        .arg(Arg::new("confidence-threshold").long("confidence-threshold").value_name("NUM").help("Minimum confidence threshold"))
+        .arg(Arg::new("include-raw").long("include-raw").action(ArgAction::SetTrue).help("Include raw snippets in reasoning task"))
 }
 
 fn enum_subdomains() -> Command {

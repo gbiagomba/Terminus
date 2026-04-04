@@ -3,6 +3,7 @@ use anyhow::Result;
 mod cli;
 mod diff;
 mod r#enum;
+mod ai;
 mod help;
 mod interact;
 mod models;
@@ -28,10 +29,7 @@ async fn main() -> Result<()> {
         }
         Some(("help", sub)) => help::run_help(sub),
         Some(("enum", sub)) => r#enum::run_enum(sub).await,
-        Some(("ai", _)) => {
-            println!("AI subcommand is not yet implemented in this phase.");
-            Ok(())
-        }
+        Some(("ai", sub)) => ai::run_ai(sub).await,
         _ => Ok(()),
     }
 }
