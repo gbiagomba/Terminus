@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **JS/HTML Redirect Detection**: Expanded heuristics for `location` assignments, `setTimeout` redirects, and meta refresh tags
 - **AI Mode Behavior**: Mode-specific objective shaping for prioritize/cluster/diff/validate/campaign workflows
 
+### Fixed
+- **Custom Port URLs**: Correctly inserts non-standard ports before URL paths (e.g., `http://host:8001/path`)
+
 ## [3.5.0] - 2026-04-03
 
 ### Added
