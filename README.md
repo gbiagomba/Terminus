@@ -72,6 +72,7 @@
   - Full response bodies and headers preserved for deep analysis
   - Includes `arbitrary_method_used` column for fuzzed methods
   - Optional interactive query shell via `terminus interact --db <SQLITE_FILE>`
+  - Schema versioning with `schema_version` table for migrations and extended persistence tables
 - **Shared Output Core**: Stdout/TXT/HTML/CSV render through a shared output-row model for consistent formatting across future subcommands
 
 ### HTTP Testing

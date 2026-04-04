@@ -3,6 +3,8 @@ use rusqlite::{Connection, params};
 
 use crate::models::ScanResult;
 
+const SCHEMA_VERSION: i32 = 2;
+
 pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
     let filename = format!("{}.db", output_base.unwrap_or("terminus_results"));
     let conn = Connection::open(&filename)
@@ -171,6 +173,8 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
 }
 
 fn ensure_sqlite_schema(conn: &Connection) -> Result<()> {
+    ensure_schema_version_table(conn)?;
+
     let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
     let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
     let mut has_arbitrary_method = false;
@@ -190,6 +194,132 @@ fn ensure_sqlite_schema(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+
+    let current_version = get_schema_version(conn)?;
+    if current_version < 2 {
+        create_evidence_tables(conn)?;
+        set_schema_version(conn, 2)?;
+    } else {
+        create_evidence_tables(conn)?;
+    }
+
+    Ok(())
+}
+
+fn ensure_schema_version_table(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+
+    if count == 0 {
+        conn.execute(
+            "INSERT INTO schema_version (id, version) VALUES (1, ?1)",
+            params![SCHEMA_VERSION],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn get_schema_version(conn: &Connection) -> Result<i32> {
+    let version: i32 = conn.query_row(
+        "SELECT version FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(version)
+}
+
+fn set_schema_version(conn: &Connection, version: i32) -> Result<()> {
+    conn.execute(
+        "UPDATE schema_version SET version = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        params![version],
+    )?;
+    Ok(())
+}
+
+fn create_evidence_tables(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS evidence_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            method TEXT NOT NULL,
+            status INTEGER,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS hypotheses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            hypothesis TEXT NOT NULL,
+            confidence REAL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ai_assessments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            provider TEXT,
+            model TEXT,
+            assessment_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS operator_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            finding_id TEXT,
+            feedback TEXT NOT NULL,
+            label TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS enumeration_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id TEXT NOT NULL,
+            target TEXT NOT NULL,
+            result_type TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS diff_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            base_scan_id TEXT NOT NULL,
+            compare_scan_id TEXT NOT NULL,
+            diff_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
 
     Ok(())
 }
