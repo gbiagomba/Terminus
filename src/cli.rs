@@ -98,7 +98,7 @@ fn ai_mode(name: &'static str) -> Command {
     Command::new(name)
         .about("AI mode")
         .arg(Arg::new("db").long("db").value_name("SQLITE_FILE").required(true).help("Terminus SQLite database file"))
-        .arg(Arg::new("provider").long("provider").value_name("PROVIDER").help("openai, openai-compatible, anthropic, gemini, cohere"))
+        .arg(Arg::new("provider").long("provider").value_name("PROVIDER").help("openai, openai-compatible, anthropic, gemini, cohere, groq, ollama"))
         .arg(Arg::new("model").long("model").value_name("MODEL").help("LLM model name"))
         .arg(Arg::new("base-url").long("base-url").value_name("URL").help("Override provider base URL (OpenAI compatible)"))
         .arg(Arg::new("max-findings").long("max-findings").value_name("NUM").help("Maximum findings to return"))

@@ -104,11 +104,12 @@ pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<
 
 pub fn extract_js_redirect_target(body: &str) -> Option<String> {
     let patterns = [
-        r#"(?is)(?:window|document|self|top)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
-        r#"(?is)(?:window|document|self|top)?\.?location\[['"`]?href['"`]?\]\s*=\s*["'`]([^"'`]+)["'`]"#,
-        r#"(?is)(?:window|document|self|top)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\[['"`]?href['"`]?\]\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
         r#"(?is)window\.navigate\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
-        r#"(?is)setTimeout\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
+        r#"(?is)setTimeout\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
+        r#"(?is)setInterval\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
     ];
 
     for pattern in patterns {
@@ -125,7 +126,7 @@ pub fn extract_js_redirect_target(body: &str) -> Option<String> {
 }
 
 pub fn extract_meta_refresh_target(body: &str) -> Option<String> {
-    let meta_pattern = r#"(?is)<meta[^>]+http-equiv=["'`]refresh["'`][^>]+content=["'`]\s*\d+\s*;\s*url=([^"'`>]+)["'`][^>]*>"#;
+    let meta_pattern = r#"(?is)<meta[^>]+http-equiv=["'`]refresh["'`][^>]+content=["'`]\s*\d+\s*;\s*url=['"`]?([^"'`>]+)['"`]?\s*["'`][^>]*>"#;
     if let Ok(regex) = Regex::new(meta_pattern) {
         if let Some(captures) = regex.captures(body) {
             if let Some(target) = captures.get(1) {
@@ -198,10 +199,24 @@ mod tests {
     }
 
     #[test]
+    fn extracts_setinterval_location_redirect() {
+        let body = r#"<script>setInterval(function(){ parent.location="/soon"; }, 1000);</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/soon"));
+    }
+
+    #[test]
     fn extracts_meta_refresh_redirect() {
         let body = r#"<meta http-equiv="refresh" content="0; url=/meta-redirect">"#;
         let target = extract_meta_refresh_target(body);
         assert_eq!(target.as_deref(), Some("/meta-redirect"));
+    }
+
+    #[test]
+    fn extracts_quoted_meta_refresh_redirect() {
+        let body = r#"<meta http-equiv="refresh" content="0; url='/meta-quoted'">"#;
+        let target = extract_meta_refresh_target(body);
+        assert_eq!(target.as_deref(), Some("/meta-quoted"));
     }
 
     #[test]

@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.2] - 2026-04-04
+
+### Added
+- **AI Provider Aliases**: Added `groq` and `ollama` provider shorthands via OpenAI-compatible endpoints
+- **AI Response Parsing**: Tolerant JSON sanitization for providers that wrap outputs in code fences
+
 ## [3.5.1] - 2026-04-04
 
 ### Added
-- **JS/HTML Redirect Detection**: Expanded heuristics for `location` assignments, `setTimeout` redirects, and meta refresh tags
+- **JS/HTML Redirect Detection**: Expanded heuristics for `location` assignments, `setTimeout`/`setInterval`, bracketed `location["href"]`, and meta refresh tags
 - **AI Mode Behavior**: Mode-specific objective shaping for prioritize/cluster/diff/validate/campaign workflows
 
 ### Fixed

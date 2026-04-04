@@ -315,6 +315,7 @@ Examples of cloud support:
 - Anthropic
 - Gemini
 - Cohere
+(Groq via OpenAI-compatible endpoint)
 (if Rig supports them cleanly in current version)
 
 Design the AI layer so Rig is used behind an abstraction.

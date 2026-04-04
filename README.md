@@ -976,7 +976,10 @@ Use the Rust AI pipeline to reason over SQLite evidence:
 terminus ai prioritize --db scan.db --provider openai --model gpt-4o
 ```
 
-Providers: `openai`, `openai-compatible` (via `OPENAI_BASE_URL`), `anthropic`, `gemini`, `cohere`.
+Providers: `openai`, `openai-compatible` (via `OPENAI_BASE_URL`), `anthropic`, `gemini`, `cohere`, `groq`, `ollama`.
+Default aliases:
+- `groq` → `https://api.groq.com/openai/v1` (uses `GROQ_API_KEY`)
+- `ollama` → `http://localhost:11434/v1` (no key required)
 
 ### Companion Python Script (Optional)
 The `athena.py` script analyzes JSON outputs when you prefer a standalone post-processing workflow.
