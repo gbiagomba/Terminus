@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-04-03
+
+### Added
+- **Shared Output Rows**: Output pipeline now renders through a shared `OutputRow` model to support future subcommands
+
+### Changed
+- **Renderers**: Stdout/TXT/HTML/CSV now consume normalized output rows while JSON/SQLite preserve full scan schema
+
 ## [3.1.0] - 2026-04-03
 
 ### Added

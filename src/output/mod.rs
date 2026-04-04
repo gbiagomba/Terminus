@@ -4,31 +4,45 @@ use std::io::Write;
 
 use crate::models::{OutputFormat, ScanResult};
 use crate::storage::sqlite::output_sqlite;
+use crate::output::types::OutputRow;
+
+pub mod types;
 
 pub fn output_results(results: &[ScanResult], format: OutputFormat, output_base: Option<&str>, verbose: bool) -> Result<()> {
+    let rows = build_output_rows(results);
     match format {
         OutputFormat::Stdout => {
             if !verbose {
-                output_stdout(results, verbose);
+                output_stdout(&rows, verbose);
             }
         }
-        OutputFormat::Txt => output_txt(results, output_base, verbose)?,
+        OutputFormat::Txt => output_txt(&rows, output_base, verbose)?,
         OutputFormat::Json => output_json(results, output_base)?,
-        OutputFormat::Html => output_html(results, output_base)?,
-        OutputFormat::Csv => output_csv(results, output_base, verbose)?,
+        OutputFormat::Html => output_html(&rows, output_base)?,
+        OutputFormat::Csv => output_csv(&rows, output_base, verbose)?,
         OutputFormat::Sqlite => output_sqlite(results, output_base)?,
         OutputFormat::All => {
             if !verbose {
-                output_stdout(results, verbose);
+                output_stdout(&rows, verbose);
             }
-            output_txt(results, output_base, verbose)?;
+            output_txt(&rows, output_base, verbose)?;
             output_json(results, output_base)?;
-            output_html(results, output_base)?;
-            output_csv(results, output_base, verbose)?;
+            output_html(&rows, output_base)?;
+            output_csv(&rows, output_base, verbose)?;
             output_sqlite(results, output_base)?;
         }
     }
     Ok(())
+}
+
+fn build_output_rows(results: &[ScanResult]) -> Vec<OutputRow> {
+    results
+        .iter()
+        .map(|result| {
+            let indicators = collect_vuln_indicators(result);
+            OutputRow::from_scan(result, indicators)
+        })
+        .collect()
 }
 
 pub fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
@@ -95,14 +109,13 @@ pub fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
     indicators
 }
 
-pub fn output_stdout(results: &[ScanResult], verbose: bool) {
+pub fn output_stdout(results: &[OutputRow], verbose: bool) {
     for result in results {
         if let Some(error) = &result.error {
             eprintln!("Error on {}:{} using {}: {}", result.url, result.port, result.method, error);
         } else {
-            let vuln_indicators = collect_vuln_indicators(result);
-            let indicators_str = if !vuln_indicators.is_empty() {
-                format!(" {}", vuln_indicators.join(" "))
+            let indicators_str = if !result.indicators.is_empty() {
+                format!(" {}", result.indicators.join(" "))
             } else {
                 String::new()
             };
@@ -123,7 +136,7 @@ pub fn output_stdout(results: &[ScanResult], verbose: bool) {
     }
 }
 
-pub fn output_txt(results: &[ScanResult], output_base: Option<&str>, verbose: bool) -> Result<()> {
+pub fn output_txt(results: &[OutputRow], output_base: Option<&str>, verbose: bool) -> Result<()> {
     let filename = format!("{}.txt", output_base.unwrap_or("terminus_results"));
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
 
@@ -131,9 +144,8 @@ pub fn output_txt(results: &[ScanResult], output_base: Option<&str>, verbose: bo
         if let Some(error) = &result.error {
             writeln!(file, "Error on {}:{} using {}: {}", result.url, result.port, result.method, error)?;
         } else {
-            let vuln_indicators = collect_vuln_indicators(result);
-            let indicators_str = if !vuln_indicators.is_empty() {
-                format!(" {}", vuln_indicators.join(" "))
+            let indicators_str = if !result.indicators.is_empty() {
+                format!(" {}", result.indicators.join(" "))
             } else {
                 String::new()
             };
@@ -165,7 +177,7 @@ pub fn output_json(results: &[ScanResult], output_base: Option<&str>) -> Result<
     Ok(())
 }
 
-pub fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
+pub fn output_html(results: &[OutputRow], output_base: Option<&str>) -> Result<()> {
     let filename = format!("{}.html", output_base.unwrap_or("terminus_results"));
 
     let total_results = results.len();
@@ -182,47 +194,35 @@ pub fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<
     vuln_counts.insert("error_messages", 0);
 
     for result in results {
-        if let Some(ref desync) = result.http2_desync {
-            if desync.desync_detected {
+        for indicator in &result.indicators {
+            if indicator.contains("HTTP/2 Desync") {
                 *vuln_counts.get_mut("http2_desync").unwrap() += 1;
             }
-        }
-        if let Some(ref host_inj) = result.host_injection {
-            if host_inj.injection_suspected {
+            if indicator.contains("Host Injection") {
                 *vuln_counts.get_mut("host_injection").unwrap() += 1;
             }
-        }
-        if let Some(ref xff) = result.xff_bypass {
-            if xff.bypass_suspected {
+            if indicator.contains("XFF Bypass") {
                 *vuln_counts.get_mut("xff_bypass").unwrap() += 1;
             }
-        }
-        if let Some(ref csrf) = result.csrf_result {
-            if csrf.csrf_suspected {
+            if indicator.contains("CSRF") {
                 *vuln_counts.get_mut("csrf").unwrap() += 1;
             }
-        }
-        if let Some(ref ssrf) = result.ssrf_result {
-            if ssrf.ssrf_suspected {
+            if indicator.contains("SSRF") {
                 *vuln_counts.get_mut("ssrf").unwrap() += 1;
             }
-        }
-        if let Some(true) = result.reflection_detected {
-            *vuln_counts.get_mut("reflection").unwrap() += 1;
-        }
-        if let Some(true) = result.arbitrary_method_accepted {
-            *vuln_counts.get_mut("arbitrary_method").unwrap() += 1;
-        }
-        if let Some(true) = result.method_confusion_suspected {
-            *vuln_counts.get_mut("method_confusion").unwrap() += 1;
-        }
-        if let Some(ref sec_headers) = result.security_headers {
-            if !sec_headers.issues.is_empty() {
+            if indicator.contains("Reflection") {
+                *vuln_counts.get_mut("reflection").unwrap() += 1;
+            }
+            if indicator.contains("Arbitrary Method Accepted") {
+                *vuln_counts.get_mut("arbitrary_method").unwrap() += 1;
+            }
+            if indicator.contains("Method Confusion") {
+                *vuln_counts.get_mut("method_confusion").unwrap() += 1;
+            }
+            if indicator.contains("Security:") {
                 *vuln_counts.get_mut("security_issues").unwrap() += 1;
             }
-        }
-        if let Some(ref errors) = result.detected_errors {
-            if !errors.is_empty() {
+            if indicator.contains("Error:") {
                 *vuln_counts.get_mut("error_messages").unwrap() += 1;
             }
         }
@@ -336,61 +336,45 @@ pub fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<
         let mut vuln_tags: Vec<String> = Vec::new();
         let mut data_vulns = Vec::new();
 
-        if let Some(ref desync) = result.http2_desync {
-            if desync.desync_detected {
+        for indicator in &result.indicators {
+            if indicator.contains("HTTP/2 Desync") {
                 vuln_tags.push("<span class='vuln-badge'>HTTP/2 Desync</span>".to_string());
                 data_vulns.push("http2");
             }
-        }
-        if let Some(ref host_inj) = result.host_injection {
-            if host_inj.injection_suspected {
+            if indicator.contains("Host Injection") {
                 vuln_tags.push("<span class='vuln-badge'>Host Injection</span>".to_string());
                 data_vulns.push("host");
             }
-        }
-        if let Some(ref xff) = result.xff_bypass {
-            if xff.bypass_suspected {
+            if indicator.contains("XFF Bypass") {
                 vuln_tags.push("<span class='vuln-badge'>XFF Bypass</span>".to_string());
                 data_vulns.push("xff");
             }
-        }
-        if let Some(ref csrf) = result.csrf_result {
-            if csrf.csrf_suspected {
+            if indicator.contains("CSRF") {
                 vuln_tags.push("<span class='vuln-badge'>CSRF</span>".to_string());
                 data_vulns.push("csrf");
             }
-        }
-        if let Some(ref ssrf) = result.ssrf_result {
-            if ssrf.ssrf_suspected {
+            if indicator.contains("SSRF") {
                 vuln_tags.push("<span class='vuln-badge'>SSRF</span>".to_string());
                 data_vulns.push("ssrf");
             }
-        }
-        if let Some(true) = result.reflection_detected {
-            vuln_tags.push("<span class='vuln-badge'>Reflection</span>".to_string());
-            data_vulns.push("reflection");
-        }
-        if let Some(true) = result.arbitrary_method_accepted {
-            vuln_tags.push("<span class='vuln-badge'>Arbitrary Method Accepted</span>".to_string());
-            data_vulns.push("arbitrary");
-        }
-        if let Some(true) = result.method_confusion_suspected {
-            vuln_tags.push("<span class='vuln-badge'>Method Confusion</span>".to_string());
-            data_vulns.push("confusion");
-        }
-        if let Some(ref sec_headers) = result.security_headers {
-            if !sec_headers.issues.is_empty() {
-                for issue in &sec_headers.issues {
-                    vuln_tags.push(format!("<span class='vuln-badge security' title='Security Issue'>{}</span>", html_escape(issue)));
-                }
+            if indicator.contains("Reflection") {
+                vuln_tags.push("<span class='vuln-badge'>Reflection</span>".to_string());
+                data_vulns.push("reflection");
+            }
+            if indicator.contains("Arbitrary Method Accepted") {
+                vuln_tags.push("<span class='vuln-badge'>Arbitrary Method Accepted</span>".to_string());
+                data_vulns.push("arbitrary");
+            }
+            if indicator.contains("Method Confusion") {
+                vuln_tags.push("<span class='vuln-badge'>Method Confusion</span>".to_string());
+                data_vulns.push("confusion");
+            }
+            if indicator.contains("[Security:") {
+                vuln_tags.push(format!("<span class='vuln-badge security' title='Security Issue'>{}</span>", html_escape(indicator)));
                 data_vulns.push("security");
             }
-        }
-        if let Some(ref errors) = result.detected_errors {
-            if !errors.is_empty() {
-                for error in errors {
-                    vuln_tags.push(format!("<span class='vuln-badge security' title='Error Detected'>{}</span>", html_escape(error)));
-                }
+            if indicator.contains("[Error:") {
+                vuln_tags.push(format!("<span class='vuln-badge security' title='Error Detected'>{}</span>", html_escape(indicator)));
                 data_vulns.push("errors");
             }
         }
@@ -452,7 +436,7 @@ pub fn output_html(results: &[ScanResult], output_base: Option<&str>) -> Result<
     Ok(())
 }
 
-pub fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bool) -> Result<()> {
+pub fn output_csv(results: &[OutputRow], output_base: Option<&str>, verbose: bool) -> Result<()> {
     let filename = format!("{}.csv", output_base.unwrap_or("terminus_results"));
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(&filename)?;
 
@@ -469,9 +453,7 @@ pub fn output_csv(results: &[ScanResult], output_base: Option<&str>, verbose: bo
         let port = result.port.to_string();
         let error = csv_escape(result.error.as_deref().unwrap_or(""));
         let arbitrary_method_used = csv_escape(result.arbitrary_method_used.as_deref().unwrap_or(""));
-
-        let vuln_indicators = collect_vuln_indicators(result);
-        let vulnerabilities = csv_escape(&vuln_indicators.join("; "));
+        let vulnerabilities = csv_escape(&result.indicators.join("; "));
 
         let request_headers = csv_escape(result.request_headers.as_deref().unwrap_or(""));
 
