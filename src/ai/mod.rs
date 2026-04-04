@@ -3,6 +3,11 @@ use clap::ArgMatches;
 use async_trait::async_trait;
 
 pub mod correlate;
+pub mod prioritize;
+pub mod cluster;
+pub mod diff;
+pub mod validate;
+pub mod campaign;
 pub mod extract;
 pub mod provider;
 pub mod prompts;
@@ -50,6 +55,8 @@ async fn run_mode(mode: &str, matches: &ArgMatches) -> Result<()> {
         confidence_threshold,
         include_raw_snippets: include_raw,
     };
+    let mut task = task;
+    apply_mode(mode, &mut task);
 
     let config = ProviderConfig::from_args(provider, model, base_url)?;
     let engine = RigReasoningEngine::new(config.clone());
@@ -65,5 +72,41 @@ fn output_result(result: &ReasoningResult) {
     match serde_json::to_string_pretty(result) {
         Ok(json) => println!("{}", json),
         Err(_) => println!("Failed to serialize AI result"),
+    }
+}
+
+fn apply_mode(mode: &str, task: &mut ReasoningTask) {
+    match mode {
+        "prioritize" => prioritize::apply(task),
+        "cluster" => cluster::apply(task),
+        "diff" => diff::apply(task),
+        "validate" => validate::apply(task),
+        "campaign" => campaign::apply(task),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::types::ReasoningTask;
+
+    fn base_task() -> ReasoningTask {
+        ReasoningTask {
+            mode: "test".to_string(),
+            objective: "base".to_string(),
+            evidence: Vec::new(),
+            hypotheses: Vec::new(),
+            max_findings: 5,
+            confidence_threshold: 0.4,
+            include_raw_snippets: false,
+        }
+    }
+
+    #[test]
+    fn apply_mode_updates_objective() {
+        let mut task = base_task();
+        apply_mode("prioritize", &mut task);
+        assert_ne!(task.objective, "base");
     }
 }

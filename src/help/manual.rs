@@ -50,7 +50,7 @@ KEY OPTIONS
   -b, --cookie <COOKIE>        Cookie string
   -x, --proxy <PROXY>          Proxy URL
   -k, --insecure               Allow insecure TLS
-  -L, --follow                 Follow HTTP and JS redirects
+  -L, --follow                 Follow HTTP, JS, and meta refresh redirects
   --http-version <1.0|1.1|2|3> Force HTTP version
   --output-format <FORMAT>     stdout, txt, json, html, csv, sqlite, all
 

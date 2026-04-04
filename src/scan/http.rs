@@ -4,8 +4,17 @@ use url::Url;
 use http::header::{HeaderName, HeaderValue};
 
 pub fn build_full_url(url: &str, port: u16) -> String {
-    if url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':')) {
-        return url.to_string();
+    if let Ok(mut parsed) = Url::parse(url) {
+        if parsed.port().is_some() {
+            return parsed.to_string();
+        }
+        let is_standard_port = (parsed.scheme() == "https" && port == 443)
+            || (parsed.scheme() == "http" && port == 80);
+        if is_standard_port {
+            return parsed.to_string();
+        }
+        let _ = parsed.set_port(Some(port));
+        return parsed.to_string();
     }
 
     let is_https = url.starts_with("https://");
@@ -96,8 +105,10 @@ pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<
 pub fn extract_js_redirect_target(body: &str) -> Option<String> {
     let patterns = [
         r#"(?is)(?:window|document|self|top)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top)?\.?location\[['"`]?href['"`]?\]\s*=\s*["'`]([^"'`]+)["'`]"#,
         r#"(?is)(?:window|document|self|top)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
         r#"(?is)window\.navigate\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)setTimeout\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
     ];
 
     for pattern in patterns {
@@ -106,6 +117,19 @@ pub fn extract_js_redirect_target(body: &str) -> Option<String> {
                 if let Some(target) = captures.get(1) {
                     return Some(target.as_str().to_string());
                 }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_meta_refresh_target(body: &str) -> Option<String> {
+    let meta_pattern = r#"(?is)<meta[^>]+http-equiv=["'`]refresh["'`][^>]+content=["'`]\s*\d+\s*;\s*url=([^"'`>]+)["'`][^>]*>"#;
+    if let Ok(regex) = Regex::new(meta_pattern) {
+        if let Some(captures) = regex.captures(body) {
+            if let Some(target) = captures.get(1) {
+                return Some(target.as_str().trim().to_string());
             }
         }
     }
@@ -125,7 +149,7 @@ pub fn extract_redirect_target(
     }
 
     response_body
-        .and_then(extract_js_redirect_target)
+        .and_then(|body| extract_meta_refresh_target(body).or_else(|| extract_js_redirect_target(body)))
         .and_then(|target| resolve_redirect_target(base_url, &target))
 }
 
@@ -160,6 +184,27 @@ mod tests {
     }
 
     #[test]
+    fn extracts_bracketed_location_redirect() {
+        let body = r#"<script>window.location['href'] = "/next";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/next"));
+    }
+
+    #[test]
+    fn extracts_settimeout_location_redirect() {
+        let body = r#"<script>setTimeout(function(){ location.href="/later"; }, 10);</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/later"));
+    }
+
+    #[test]
+    fn extracts_meta_refresh_redirect() {
+        let body = r#"<meta http-equiv="refresh" content="0; url=/meta-redirect">"#;
+        let target = extract_meta_refresh_target(body);
+        assert_eq!(target.as_deref(), Some("/meta-redirect"));
+    }
+
+    #[test]
     fn prefers_location_header_over_js_redirect() {
         let headers = vec![("Location".to_string(), "/http-redirect".to_string())];
 
@@ -170,5 +215,11 @@ mod tests {
         );
 
         assert_eq!(redirect.as_deref(), Some("https://example.com/http-redirect"));
+    }
+
+    #[test]
+    fn build_full_url_inserts_port_before_path() {
+        let url = build_full_url("http://127.0.0.1/index.html", 8001);
+        assert_eq!(url, "http://127.0.0.1:8001/index.html");
     }
 }

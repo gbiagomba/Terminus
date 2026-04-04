@@ -3,6 +3,7 @@ use clap::{Arg, ArgAction, Command};
 pub fn build_cli() -> Command {
     Command::new("Terminus")
         .disable_version_flag(true)
+        .disable_help_subcommand(true)
         .about("URL testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, and concurrent scanning")
         .subcommand_required(true)
         .arg_required_else_help(true)

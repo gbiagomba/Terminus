@@ -146,7 +146,8 @@
 ### JavaScript Redirect Following (v2.13.0)
 - **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies
 - **Supported Patterns**: `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
-- **Relative URL Resolution**: Relative JavaScript redirect targets are resolved against the current response URL before being requested
+- **Relative URL Resolution**: Relative JavaScript/HTML redirect targets are resolved against the current response URL before being requested
+- **JS/HTML Redirect Heuristics**: Detects `location` assignments, `setTimeout` redirects, and meta refresh tags when `-L` is enabled
 
 ### Async Transport & HTTP/3 (v3.1.0)
 - **Async Transport Core**: Request execution moved to Tokio async with a transport abstraction layer
