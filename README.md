@@ -20,6 +20,9 @@
   - [Interactive SQLite Mode](#interactive-sqlite-mode-v2120)
   - [JavaScript Redirect Following](#javascript-redirect-following-v2130)
   - [Async Transport & HTTP/3](#async-transport--http3-v310)
+  - [Enumeration](#enumeration-v340)
+  - [Deterministic Diff](#deterministic-diff-v340)
+  - [Manual Help](#manual-help-v340)
 - [Installation](#installation)
   - [Using the Makefile](#using-the-makefile)
 - [Usage](#usage)
@@ -150,6 +153,21 @@
 - **HTTP/3 Support**: Real QUIC/HTTP/3 support via reqwest's HTTP/3 transport when `--http-version 3` is selected
 - **Graceful Degradation**: HTTP/3 emits friendly errors when unavailable (e.g., non-HTTPS targets or proxy usage)
 - **Build Note**: HTTP/3 relies on reqwest's unstable flag, enabled in `.cargo/config.toml` via `--cfg reqwest_unstable`
+
+### Enumeration (v3.4.0)
+- **Subdomains**: `terminus enum subdomains -d example.com -w words.txt`
+- **Paths**: `terminus enum paths -u https://example.com -w common.txt`
+- **Wildcard Suppression**: Default wildcard detection with `--no-wildcard` to disable
+- **Filters**: Status and content-length filters for precise results
+- **Output**: stdout, txt, json, html, csv, sqlite, all
+
+### Deterministic Diff (v3.4.0)
+- **Inputs**: JSON or SQLite (auto-detected)
+- **Findings**: New/removed endpoints, status changes, indicator deltas, header/body fingerprint changes, arbitrary method deltas
+- **Output**: stdout, json, csv, html, sqlite
+
+### Manual Help (v3.4.0)
+- **Help Topics**: `terminus help`, `terminus help scan`, `terminus help enum`, `terminus help diff`
 
 ### Performance & Usability Enhancements (v2.9.0)
 - **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution

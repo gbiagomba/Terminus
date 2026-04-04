@@ -756,9 +756,9 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let final_results = results.lock().await.clone();
 
     if let Some(diff_file) = matches.get_one::<String>("diff") {
-        let old_results = crate::diff::load_previous_scan(diff_file)?;
-        let diff = crate::diff::compute_diff(&old_results, &final_results);
-        crate::diff::display_diff(&diff);
+        let old_results = crate::diff::load_results_for_path(diff_file)?;
+        let diff = crate::diff::compute_diff_inline(&old_results, &final_results);
+        crate::diff::display_diff(&diff)?;
     }
 
     output_results(&final_results, output_format, output_base, verbose)?;

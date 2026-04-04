@@ -60,6 +60,8 @@ fn diff_subcommand() -> Command {
         .about("Compare two scan outputs (JSON)")
         .arg(Arg::new("base").long("base").value_name("FILE").required(true).help("Base scan JSON file"))
         .arg(Arg::new("compare").long("compare").value_name("FILE").required(true).help("Comparison scan JSON file"))
+        .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name"))
+        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, json, html, csv, sqlite"))
 }
 
 fn interact_subcommand() -> Command {
@@ -71,14 +73,52 @@ fn interact_subcommand() -> Command {
 fn help_subcommand() -> Command {
     Command::new("help")
         .about("Manual-style help (overview)")
+        .arg(Arg::new("topic").value_name("SUBCOMMAND").help("Help topic (scan, enum, diff, interact, ai)"))
 }
 
 fn enum_subcommand() -> Command {
     Command::new("enum")
         .about("Enumeration subcommands (subdomains/paths)")
+        .subcommand(enum_subdomains())
+        .subcommand(enum_paths())
 }
 
 fn ai_subcommand() -> Command {
     Command::new("ai")
         .about("AI decision-support commands")
+}
+
+fn enum_subdomains() -> Command {
+    Command::new("subdomains")
+        .about("Subdomain enumeration")
+        .arg(Arg::new("domain").short('d').long("domain").value_name("DOMAIN").required(true).help("Base domain"))
+        .arg(Arg::new("wordlist").short('w').long("wordlist").value_name("FILE").required(true).help("Wordlist file"))
+        .arg(Arg::new("scheme").long("scheme").value_name("SCHEME").help("http or https (default: https)"))
+        .arg(Arg::new("no-wildcard").long("no-wildcard").action(ArgAction::SetTrue).help("Disable wildcard suppression"))
+        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("20").help("Concurrency level"))
+        .arg(Arg::new("filter-status").long("filter-status").value_name("CODES").help("Comma-separated status filter (e.g., 200,301)"))
+        .arg(Arg::new("filter-length-min").long("filter-length-min").value_name("NUM").help("Minimum response length"))
+        .arg(Arg::new("filter-length-max").long("filter-length-max").value_name("NUM").help("Maximum response length"))
+        .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name"))
+        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, sqlite, all"))
+        .arg(Arg::new("proxy").short('x').long("proxy").value_name("PROXY").help("Proxy URL"))
+        .arg(Arg::new("insecure").short('k').long("insecure").help("Allow insecure SSL connections").action(ArgAction::SetTrue))
+}
+
+fn enum_paths() -> Command {
+    Command::new("paths")
+        .about("Path enumeration")
+        .arg(Arg::new("url").short('u').long("url").value_name("URL").required(true).help("Base URL"))
+        .arg(Arg::new("wordlist").short('w').long("wordlist").value_name("FILE").required(true).help("Wordlist file"))
+        .arg(Arg::new("extensions").long("extensions").value_name("LIST").help("Comma-separated extensions (e.g., php,asp)"))
+        .arg(Arg::new("recursive").long("recursive").action(ArgAction::SetTrue).help("Enable one-level recursion"))
+        .arg(Arg::new("no-wildcard").long("no-wildcard").action(ArgAction::SetTrue).help("Disable wildcard suppression"))
+        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("20").help("Concurrency level"))
+        .arg(Arg::new("filter-status").long("filter-status").value_name("CODES").help("Comma-separated status filter (e.g., 200,301)"))
+        .arg(Arg::new("filter-length-min").long("filter-length-min").value_name("NUM").help("Minimum response length"))
+        .arg(Arg::new("filter-length-max").long("filter-length-max").value_name("NUM").help("Maximum response length"))
+        .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name"))
+        .arg(Arg::new("output-format").long("output-format").value_name("FORMAT").help("Output format: stdout, txt, json, html, csv, sqlite, all"))
+        .arg(Arg::new("proxy").short('x').long("proxy").value_name("PROXY").help("Proxy URL"))
+        .arg(Arg::new("insecure").short('k').long("insecure").help("Allow insecure SSL connections").action(ArgAction::SetTrue))
 }

@@ -2,6 +2,9 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 
 use crate::models::ScanResult;
+use crate::r#enum::paths::EnumResult as PathEnumResult;
+use crate::r#enum::subdomains::EnumResult as SubdomainEnumResult;
+use crate::diff::DiffReport;
 
 const SCHEMA_VERSION: i32 = 2;
 
@@ -169,6 +172,66 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
     }
 
     eprintln!("Results written to {} ({} records)", filename, results.len());
+    Ok(())
+}
+
+pub fn output_enum_sqlite(results: &[SubdomainEnumResult], output_base: Option<&str>) -> Result<()> {
+    let filename = format!("{}.db", output_base.unwrap_or("terminus_enum"));
+    let conn = Connection::open(&filename)
+        .context(format!("Failed to create SQLite database: {}", filename))?;
+    ensure_sqlite_schema(&conn)?;
+
+    for result in results {
+        conn.execute(
+            "INSERT INTO enumeration_results (scan_id, target, result_type, data_json) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                "enum_subdomains",
+                result.target,
+                "subdomain",
+                serde_json::to_string(result).unwrap_or_default()
+            ],
+        )?;
+    }
+
+    eprintln!("Results written to {} ({} records)", filename, results.len());
+    Ok(())
+}
+
+pub fn output_enum_paths_sqlite(results: &[PathEnumResult], output_base: Option<&str>) -> Result<()> {
+    let filename = format!("{}.db", output_base.unwrap_or("terminus_enum"));
+    let conn = Connection::open(&filename)
+        .context(format!("Failed to create SQLite database: {}", filename))?;
+    ensure_sqlite_schema(&conn)?;
+
+    for result in results {
+        conn.execute(
+            "INSERT INTO enumeration_results (scan_id, target, result_type, data_json) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                "enum_paths",
+                result.target,
+                "path",
+                serde_json::to_string(result).unwrap_or_default()
+            ],
+        )?;
+    }
+
+    eprintln!("Results written to {} ({} records)", filename, results.len());
+    Ok(())
+}
+
+pub fn output_diff_sqlite(diff: &DiffReport, output_base: Option<&str>, base_id: &str, compare_id: &str) -> Result<()> {
+    let filename = format!("{}.db", output_base.unwrap_or("terminus_diff"));
+    let conn = Connection::open(&filename)
+        .context(format!("Failed to create SQLite database: {}", filename))?;
+    ensure_sqlite_schema(&conn)?;
+
+    let diff_json = serde_json::to_string(diff).unwrap_or_default();
+    conn.execute(
+        "INSERT INTO diff_results (base_scan_id, compare_scan_id, diff_json) VALUES (?1, ?2, ?3)",
+        params![base_id, compare_id, diff_json],
+    )?;
+
+    eprintln!("Results written to {} (1 record)", filename);
     Ok(())
 }
 

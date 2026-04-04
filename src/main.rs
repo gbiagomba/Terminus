@@ -2,6 +2,8 @@ use anyhow::Result;
 
 mod cli;
 mod diff;
+mod r#enum;
+mod help;
 mod interact;
 mod models;
 mod output;
@@ -18,20 +20,14 @@ async fn main() -> Result<()> {
         Some(("diff", sub)) => {
             let base = sub.get_one::<String>("base").expect("base is required");
             let compare = sub.get_one::<String>("compare").expect("compare is required");
-            diff::run_diff(base, compare)
+            diff::run_diff(base, compare, sub)
         }
         Some(("interact", sub)) => {
             let db = sub.get_one::<String>("db").expect("db is required");
             interact::run_interact(db)
         }
-        Some(("help", _)) => {
-            println!("Terminus manual help is not yet implemented in this phase.");
-            Ok(())
-        }
-        Some(("enum", _)) => {
-            println!("Enum subcommand is not yet implemented in this phase.");
-            Ok(())
-        }
+        Some(("help", sub)) => help::run_help(sub),
+        Some(("enum", sub)) => r#enum::run_enum(sub).await,
         Some(("ai", _)) => {
             println!("AI subcommand is not yet implemented in this phase.");
             Ok(())
