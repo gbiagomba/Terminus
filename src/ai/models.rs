@@ -20,7 +20,12 @@ impl ModelListFormat {
     }
 }
 
-pub async fn list_models(provider: &str, base_url: Option<String>, format: ModelListFormat) -> Result<()> {
+pub async fn list_models(
+    provider: &str,
+    base_url: Option<String>,
+    format: ModelListFormat,
+    output_base: Option<&str>,
+) -> Result<()> {
     let config = ProviderConfig::from_args(provider, "unused", base_url)?;
     let models = match config.kind {
         ProviderKind::OpenAi | ProviderKind::OpenAiCompatible => {
@@ -39,7 +44,7 @@ pub async fn list_models(provider: &str, base_url: Option<String>, format: Model
         }
     };
 
-    output_models(&models, format);
+    output_models(&models, format, output_base)?;
     Ok(())
 }
 
@@ -111,7 +116,7 @@ pub async fn list_ollama_models() -> Result<Vec<String>> {
     Ok(models)
 }
 
-fn output_models(models: &[String], format: ModelListFormat) {
+fn output_models(models: &[String], format: ModelListFormat, output_base: Option<&str>) -> Result<()> {
     match format {
         ModelListFormat::Stdout => {
             for model in models {
@@ -119,15 +124,28 @@ fn output_models(models: &[String], format: ModelListFormat) {
             }
         }
         ModelListFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(models) {
-                println!("{}", json);
-            }
+            let json = serde_json::to_string_pretty(models)?;
+            write_or_print(output_base, "json", &json)?;
         }
         ModelListFormat::Csv => {
-            println!("model");
+            let mut csv = String::from("model\n");
             for model in models {
-                println!("{}", model);
+                csv.push_str(model);
+                csv.push('\n');
             }
+            write_or_print(output_base, "csv", &csv)?;
         }
     }
+    Ok(())
+}
+
+fn write_or_print(output_base: Option<&str>, ext: &str, content: &str) -> Result<()> {
+    if let Some(base) = output_base {
+        let filename = format!("{}.{}", base, ext);
+        std::fs::write(&filename, content)?;
+        println!("Models written to {}", filename);
+    } else {
+        println!("{}", content);
+    }
+    Ok(())
 }

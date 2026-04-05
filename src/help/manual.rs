@@ -137,5 +137,6 @@ EXAMPLE
   terminus ai prioritize --db scan.db --provider groq --model llama-3.1-8b-instant --strict-json
   terminus ai prioritize --provider openai --list-models
   terminus ai prioritize --provider openai --list-models --list-models-format json
+  terminus ai prioritize --provider openai --list-models --list-models-format csv -o models
 "#.to_string()
 }

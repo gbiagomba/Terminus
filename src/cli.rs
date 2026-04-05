@@ -107,6 +107,7 @@ fn ai_mode(name: &'static str) -> Command {
         .arg(Arg::new("strict-json").long("strict-json").action(ArgAction::SetTrue).help("Reject partial AI output that does not match the ReasoningResult schema"))
         .arg(Arg::new("list-models").long("list-models").action(ArgAction::SetTrue).help("List available models for the selected provider and exit"))
         .arg(Arg::new("list-models-format").long("list-models-format").value_name("FORMAT").help("List models output format: stdout, json, csv (default: stdout)"))
+        .arg(Arg::new("output").short('o').long("output").value_name("FILE").help("Output file base name (used with --list-models-format json/csv)"))
 }
 
 fn enum_subdomains() -> Command {

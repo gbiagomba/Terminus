@@ -986,6 +986,7 @@ Model discovery:
 terminus ai prioritize --provider openai --list-models
 terminus ai prioritize --provider ollama --list-models
 terminus ai prioritize --provider openai --list-models --list-models-format json
+terminus ai prioritize --provider openai --list-models --list-models-format csv -o models
 ```
 
 Strict JSON parsing:

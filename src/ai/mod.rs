@@ -41,11 +41,12 @@ async fn run_mode(mode: &str, matches: &ArgMatches) -> Result<()> {
     let base_url = matches.get_one::<String>("base-url").cloned();
     let list_models = matches.get_flag("list-models");
     let list_models_format = matches.get_one::<String>("list-models-format").map(|s| s.as_str());
+    let list_models_output = matches.get_one::<String>("output").map(|s| s.as_str());
     let strict_json = matches.get_flag("strict-json");
 
     if list_models {
         let format = models::ModelListFormat::from_str(list_models_format);
-        models::list_models(provider, base_url, format).await?;
+        models::list_models(provider, base_url, format, list_models_output).await?;
         return Ok(());
     }
 
