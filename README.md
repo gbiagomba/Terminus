@@ -206,6 +206,12 @@ cargo build --release
 cargo install --path .
 ```
 
+**HTTP/3 build note**:
+Reqwest HTTP/3 requires `RUSTFLAGS="--cfg reqwest_unstable"`. This repo sets it in `.cargo/config.toml`, but if you build outside the repo or override flags, export it manually:
+```bash
+export RUSTFLAGS="--cfg reqwest_unstable"
+```
+
 ---
 
 ### Using the `Makefile`

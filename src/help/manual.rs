@@ -58,6 +58,7 @@ WORKFLOWS
   - Start with `--scan-level standard` for passive checks.
   - Use `--fuzz-methods` or `-X ALL` to detect method confusion.
   - For HTTP/3, use `--http-version 3` and HTTPS targets only.
+  - HTTP/3 builds require `RUSTFLAGS="--cfg reqwest_unstable"` (already set in `.cargo/config.toml`).
 "#.to_string()
 }
 
