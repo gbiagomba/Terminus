@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.6] - 2026-04-04
+
+### Added
+- **Build Script Warning**: Emits a hint if `reqwest_unstable` is not set
+- **CI Check**: Added CI workflow with `RUSTFLAGS="--cfg reqwest_unstable"`
+
+### Changed
+- **Release Workflow**: Sets `RUSTFLAGS="--cfg reqwest_unstable"` during builds
+
 ## [3.5.5] - 2026-04-04
 
 ### Added

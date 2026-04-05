@@ -212,6 +212,8 @@ Reqwest HTTP/3 requires `RUSTFLAGS="--cfg reqwest_unstable"`. This repo sets it 
 export RUSTFLAGS="--cfg reqwest_unstable"
 ```
 
+CI runs with `RUSTFLAGS="--cfg reqwest_unstable"` to ensure HTTP/3 builds are covered.
+
 ---
 
 ### Using the `Makefile`
