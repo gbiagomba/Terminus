@@ -138,10 +138,31 @@
   - `[Method Confusion Suspected]` when response status differs from baseline GET
 - **Custom Methods**: Add methods via `--custom-method` or `--custom-methods-file`
 
+### Active Exploit Modules (v3.6.0)
+- **Unified `--exploit` Flag**: Run one or more exploit modules in a single scan:
+  - `terminus scan -u https://target.com --exploit xss,sqli,open_redirect`
+  - `terminus scan -u https://target.com --exploit csrf,ssrf`
+- **Supported Modules**: `xss`, `sqli`, `open_redirect`, `csrf`, `ssrf`, `header`, `smuggling`
+- **Custom Payloads**: Provide a payload file (one per line) with `--payloads payloads.txt`
+  - Falls back to built-in canned payloads when the file is empty or not provided
+- **XSS Detection**: Injects payloads into query parameters and checks for reflection in the response body
+- **SQLi Detection**: Injects payloads and looks for database error strings in responses
+- **Open Redirect Detection**: Injects redirect payloads and inspects the `Location` response header
+
 ### Interactive SQLite Mode (v2.12.0)
-- **REPL for SQLite**: Use `terminus interact --db <SQLITE_FILE>` to explore a Terminus DB without arbitrary SQL
-- **Safe Commands**: `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
-- **Pagination**: 20-row pages with `--more` support
+- **TUI Mode (default)**: Use `terminus interact --db <SQLITE_FILE>` to launch the ratatui TUI
+  - Arrow keys to navigate rows
+  - `Enter` to inspect a row's full details
+  - `r` to replay the selected request
+  - `/` to enter search mode (filter by URL or method)
+  - `:open <id>` to open a specific scan by ID
+  - `:replay <id>` to replay a specific scan by ID
+  - `:filter status <code>` to filter by HTTP status code
+  - `?` for keyboard help
+  - `q` or `Esc` to quit
+- **REPL Mode**: Use `--no-tui` for the classic text-based REPL:
+  - `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
+  - Pagination: 20-row pages with `--more` support
 
 ### JavaScript Redirect Following (v2.13.0)
 - **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies

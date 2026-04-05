@@ -3,6 +3,7 @@ use clap::ArgMatches;
 use http::StatusCode;
 use rand::RngExt;
 use regex::Regex;
+use reqwest;
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::io;
@@ -18,8 +19,10 @@ use crate::output::{collect_vuln_indicators, output_results};
 use crate::scan::analysis::{analyze_security_headers, check_reflection, detect_error_messages, extract_links_from_body};
 use crate::scan::exploits::{
     perform_csrf_check, perform_host_injection_check, perform_http2_desync_check,
-    perform_ssrf_check, perform_xff_bypass_check,
+    perform_open_redirect_check, perform_sqli_check, perform_ssrf_check,
+    perform_xff_bypass_check, perform_xss_check,
 };
+use crate::scan::exploits::payloads::{load_payloads_from_file, OPEN_REDIRECT_PAYLOADS, SQLI_PAYLOADS, XSS_PAYLOADS};
 use crate::scan::http::{
     build_full_url, extract_redirect_target, flatten_headers, normalize_method, parse_header,
 };
@@ -112,6 +115,60 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let detect_xff_bypass = matches.get_flag("detect-xff-bypass") || preset_detect_xff_bypass;
     let detect_csrf = matches.get_flag("detect-csrf") || preset_detect_csrf;
     let detect_ssrf = matches.get_flag("detect-ssrf") || preset_detect_ssrf;
+
+    // Parse --exploit unified flag
+    let exploit_modules: HashSet<String> = matches
+        .get_one::<String>("exploit")
+        .map(|val| {
+            val.split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Also enable individual flags from --exploit modules
+    let detect_csrf = detect_csrf || exploit_modules.contains("csrf");
+    let detect_ssrf = detect_ssrf || exploit_modules.contains("ssrf");
+    let detect_xss = exploit_modules.contains("xss");
+    let detect_sqli = exploit_modules.contains("sqli");
+    let detect_open_redirect = exploit_modules.contains("open_redirect");
+
+    // Build payload lists (prefer user-supplied file, fall back to canned)
+    let custom_payloads_file = matches.get_one::<String>("payloads");
+
+    let xss_payloads: Vec<String> = if let Some(file) = custom_payloads_file {
+        let loaded = load_payloads_from_file(file);
+        if loaded.is_empty() {
+            XSS_PAYLOADS.iter().map(|s| s.to_string()).collect()
+        } else {
+            loaded
+        }
+    } else {
+        XSS_PAYLOADS.iter().map(|s| s.to_string()).collect()
+    };
+
+    let sqli_payloads: Vec<String> = if let Some(file) = custom_payloads_file {
+        let loaded = load_payloads_from_file(file);
+        if loaded.is_empty() {
+            SQLI_PAYLOADS.iter().map(|s| s.to_string()).collect()
+        } else {
+            loaded
+        }
+    } else {
+        SQLI_PAYLOADS.iter().map(|s| s.to_string()).collect()
+    };
+
+    let open_redirect_payloads: Vec<String> = if let Some(file) = custom_payloads_file {
+        let loaded = load_payloads_from_file(file);
+        if loaded.is_empty() {
+            OPEN_REDIRECT_PAYLOADS.iter().map(|s| s.to_string()).collect()
+        } else {
+            loaded
+        }
+    } else {
+        OPEN_REDIRECT_PAYLOADS.iter().map(|s| s.to_string()).collect()
+    };
 
     let rate_limiter_option = if let Some(rate_str) = matches.get_one::<String>("rate-limit") {
         Some(RateLimiter::new(rate_str)?)
@@ -382,6 +439,9 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
         let grep_pattern = grep_pattern.clone();
         let random_delay_range = random_delay_range;
         let proxy_url = proxy_url.clone();
+        let xss_payloads = xss_payloads.clone();
+        let sqli_payloads = sqli_payloads.clone();
+        let open_redirect_payloads = open_redirect_payloads.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = permit;
@@ -571,6 +631,42 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                     } else {
                         None
                     };
+
+                    // Build a shared reqwest client for exploit checks
+                    let exploit_client = reqwest::Client::builder()
+                        .danger_accept_invalid_certs(allow_insecure)
+                        .redirect(reqwest::redirect::Policy::none())
+                        .build()
+                        .unwrap_or_default();
+
+                    let xss_confirmed = if detect_xss {
+                        perform_xss_check(&full_url, &exploit_client, &xss_payloads).await
+                    } else {
+                        Vec::new()
+                    };
+
+                    let sqli_confirmed = if detect_sqli {
+                        perform_sqli_check(&full_url, &exploit_client, &sqli_payloads).await
+                    } else {
+                        Vec::new()
+                    };
+
+                    let open_redirect_confirmed = if detect_open_redirect {
+                        perform_open_redirect_check(&full_url, &exploit_client, &open_redirect_payloads).await
+                    } else {
+                        Vec::new()
+                    };
+
+                    // Log findings to stderr for now (future: integrate into ScanResult)
+                    if !xss_confirmed.is_empty() {
+                        eprintln!("[XSS] {} confirmed payloads at {}: {:?}", xss_confirmed.len(), full_url, xss_confirmed);
+                    }
+                    if !sqli_confirmed.is_empty() {
+                        eprintln!("[SQLi] {} confirmed payloads at {}: {:?}", sqli_confirmed.len(), full_url, sqli_confirmed);
+                    }
+                    if !open_redirect_confirmed.is_empty() {
+                        eprintln!("[OpenRedirect] {} confirmed payloads at {}: {:?}", open_redirect_confirmed.len(), full_url, open_redirect_confirmed);
+                    }
 
                     if should_add {
                         if verbose && matches!(output_format, OutputFormat::Stdout | OutputFormat::All) {

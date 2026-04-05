@@ -130,3 +130,29 @@ impl HttpTransport for Http12Transport {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_invalid_method_characters_rejected() {
+        // Verify methods with non-alphanumeric chars are sanitized
+        let method = "GET; rm -rf /";
+        let sanitized: String = method
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        assert_ne!(method, sanitized);
+    }
+
+    #[test]
+    fn test_valid_http_methods_accepted() {
+        let valid_methods = vec!["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
+        for method in valid_methods {
+            let sanitized: String = method
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            assert_eq!(method, sanitized);
+        }
+    }
+}

@@ -1,3 +1,8 @@
+pub mod app;
+pub mod db;
+pub mod replay;
+pub mod ui;
+
 use anyhow::{Result, Context};
 use rusqlite::{Connection, params};
 use std::collections::HashSet;
@@ -9,7 +14,21 @@ struct PageState {
     index: usize,
 }
 
+#[allow(dead_code)]
 pub fn run_interact(db_path: &str) -> Result<()> {
+    run_interact_with_opts(db_path, false)
+}
+
+#[tokio::main]
+pub async fn run_interact_tui(db_path: &str) -> Result<()> {
+    ui::run_tui(db_path).await
+}
+
+pub fn run_interact_with_opts(db_path: &str, no_tui: bool) -> Result<()> {
+    if !no_tui {
+        return run_interact_tui(db_path);
+    }
+
     let conn = Connection::open(db_path)
         .with_context(|| format!("Failed to open SQLite database: {}", db_path))?;
 

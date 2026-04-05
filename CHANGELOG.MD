@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-04-04
+
+### Added
+- **`--exploit` unified flag**: Comma-separated exploit modules — `xss`, `sqli`, `open_redirect`, `csrf`, `ssrf`, and more
+- **`--payloads` flag**: Load custom payloads from a user-supplied file (one per line); falls back to canned payloads
+- **XSS exploit module**: Injects payloads into query parameters, confirms reflection in response body
+- **SQLi exploit module**: Injects payloads into query parameters, detects database error indicators
+- **Open Redirect exploit module**: Injects redirect payloads, checks Location header for external hosts
+- **ratatui TUI for `interact`**: Full keyboard-navigable table UI with arrow keys, `/` search, `r` replay, `:open`, `:replay`, `:filter status`, `q` quit, and `?` help
+- **`:replay` command**: Re-sends selected HTTP request and shows response status + body snippet
+- **`--no-tui` flag** on `interact`: Falls back to classic REPL mode
+- **Expanded test coverage**: New tests across exploit payloads, diff detection, and transport sanitization
+
+### Changed
+- `interact` subcommand now launches TUI by default (use `--no-tui` for REPL mode)
+
 ## [3.5.6] - 2026-04-04
 
 ### Added

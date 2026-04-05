@@ -25,7 +25,8 @@ async fn main() -> Result<()> {
         }
         Some(("interact", sub)) => {
             let db = sub.get_one::<String>("db").expect("db is required");
-            interact::run_interact(db)
+            let no_tui = sub.get_flag("no-tui");
+            interact::run_interact_with_opts(db, no_tui)
         }
         Some(("help", sub)) => help::run_help(sub),
         Some(("enum", sub)) => r#enum::run_enum(sub).await,

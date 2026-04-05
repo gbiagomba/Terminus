@@ -249,4 +249,35 @@ mod tests {
         assert_eq!(report.changed_endpoints.len(), 1);
         assert!(report.changed_endpoints[0].status_changed);
     }
+
+    #[test]
+    fn test_diff_detects_status_change() {
+        let base = vec![sample("https://target.example.com/api", 200)];
+        let compare = vec![sample("https://target.example.com/api", 500)];
+        let report = compute_diff_inline(&base, &compare);
+        assert_eq!(report.changed_endpoints.len(), 1);
+        assert!(report.changed_endpoints[0].status_changed);
+        assert_eq!(report.changed_endpoints[0].old_status, Some(200));
+        assert_eq!(report.changed_endpoints[0].new_status, Some(500));
+    }
+
+    #[test]
+    fn test_diff_detects_new_endpoint() {
+        let base: Vec<ScanResult> = vec![];
+        let compare = vec![sample("https://new.example.com/login", 200)];
+        let report = compute_diff_inline(&base, &compare);
+        assert_eq!(report.new_endpoints.len(), 1);
+        assert_eq!(report.new_endpoints[0].url, "https://new.example.com/login");
+        assert!(report.removed_endpoints.is_empty());
+    }
+
+    #[test]
+    fn test_diff_detects_removed_endpoint() {
+        let base = vec![sample("https://old.example.com/admin", 403)];
+        let compare: Vec<ScanResult> = vec![];
+        let report = compute_diff_inline(&base, &compare);
+        assert_eq!(report.removed_endpoints.len(), 1);
+        assert_eq!(report.removed_endpoints[0].url, "https://old.example.com/admin");
+        assert!(report.new_endpoints.is_empty());
+    }
 }
