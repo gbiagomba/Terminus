@@ -40,10 +40,12 @@ async fn run_mode(mode: &str, matches: &ArgMatches) -> Result<()> {
     let model = matches.get_one::<String>("model").map(|s| s.as_str()).unwrap_or("gpt-4");
     let base_url = matches.get_one::<String>("base-url").cloned();
     let list_models = matches.get_flag("list-models");
+    let list_models_format = matches.get_one::<String>("list-models-format").map(|s| s.as_str());
     let strict_json = matches.get_flag("strict-json");
 
     if list_models {
-        models::list_models(provider, base_url).await?;
+        let format = models::ModelListFormat::from_str(list_models_format);
+        models::list_models(provider, base_url, format).await?;
         return Ok(());
     }
 
