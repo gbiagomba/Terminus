@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.3] - 2026-04-04
+
+### Added
+- **AI Strict JSON Mode**: `--strict-json` flag rejects partial outputs that do not match the schema
+- **AI Model Discovery**: `--list-models` for OpenAI-compatible, Gemini, and Ollama providers
+- **Redirect Heuristics**: Inline event handlers, `document['location']`, and concatenated URL literals
+
 ## [3.5.2] - 2026-04-04
 
 ### Added

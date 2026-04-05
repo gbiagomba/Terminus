@@ -103,9 +103,14 @@ pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<
 }
 
 pub fn extract_js_redirect_target(body: &str) -> Option<String> {
+    if let Some(concat) = extract_concatenated_js_redirect_target(body) {
+        return Some(concat);
+    }
+
     let patterns = [
         r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
         r#"(?is)(?:window|document|self|top|parent)?\.?location\[['"`]?href['"`]?\]\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\[['"`]?location['"`]?\](?:\[['"`]?href['"`]?\])?\s*=\s*["'`]([^"'`]+)["'`]"#,
         r#"(?is)(?:window|document|self|top|parent)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
         r#"(?is)window\.navigate\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
         r#"(?is)setTimeout\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
@@ -138,6 +143,48 @@ pub fn extract_meta_refresh_target(body: &str) -> Option<String> {
     None
 }
 
+pub fn extract_inline_event_redirect_target(body: &str) -> Option<String> {
+    let patterns = [
+        r#"(?is)<[^>]+\son\w+\s*=\s*"([^"]+)""#,
+        r#"(?is)<[^>]+\son\w+\s*=\s*'([^']+)'"#,
+    ];
+    for pattern in patterns {
+        let regex = Regex::new(pattern).ok()?;
+        for captures in regex.captures_iter(body) {
+            if let Some(raw) = captures.get(1) {
+                let chunk = raw.as_str();
+                if let Some(found) = extract_js_redirect_target(chunk) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_concatenated_js_redirect_target(body: &str) -> Option<String> {
+    let patterns = [
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*\+\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\+\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\.concat\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+    ];
+
+    for pattern in patterns {
+        if let Ok(regex) = Regex::new(pattern) {
+            if let Some(captures) = regex.captures(body) {
+                let first = captures.get(1).map(|c| c.as_str()).unwrap_or("");
+                let second = captures.get(2).map(|c| c.as_str()).unwrap_or("");
+                let combined = format!("{}{}", first, second);
+                if !combined.is_empty() {
+                    return Some(combined);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 pub fn extract_redirect_target(
     base_url: &str,
     headers: &[(String, String)],
@@ -150,7 +197,11 @@ pub fn extract_redirect_target(
     }
 
     response_body
-        .and_then(|body| extract_meta_refresh_target(body).or_else(|| extract_js_redirect_target(body)))
+        .and_then(|body| {
+            extract_meta_refresh_target(body)
+                .or_else(|| extract_inline_event_redirect_target(body))
+                .or_else(|| extract_js_redirect_target(body))
+        })
         .and_then(|target| resolve_redirect_target(base_url, &target))
 }
 
@@ -217,6 +268,27 @@ mod tests {
         let body = r#"<meta http-equiv="refresh" content="0; url='/meta-quoted'">"#;
         let target = extract_meta_refresh_target(body);
         assert_eq!(target.as_deref(), Some("/meta-quoted"));
+    }
+
+    #[test]
+    fn extracts_inline_event_redirect() {
+        let body = r#"<body onload="document.location='/inline';"></body>"#;
+        let target = extract_inline_event_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/inline"));
+    }
+
+    #[test]
+    fn extracts_concatenated_redirect() {
+        let body = r#"<script>location.href = "/a" + "/b";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/a/b"));
+    }
+
+    #[test]
+    fn extracts_document_bracket_location_redirect() {
+        let body = r#"<script>document['location']['href']="/doc";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/doc"));
     }
 
     #[test]

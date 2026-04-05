@@ -147,7 +147,7 @@
 - **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies
 - **Supported Patterns**: `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
 - **Relative URL Resolution**: Relative JavaScript/HTML redirect targets are resolved against the current response URL before being requested
-- **JS/HTML Redirect Heuristics**: Detects `location` assignments, `setTimeout` redirects, and meta refresh tags when `-L` is enabled
+- **JS/HTML Redirect Heuristics**: Detects `location` assignments, bracketed `location["href"]`, inline event handlers, concatenated literals, `setTimeout`/`setInterval` redirects, and meta refresh tags when `-L` is enabled
 
 ### Async Transport & HTTP/3 (v3.1.0)
 - **Async Transport Core**: Request execution moved to Tokio async with a transport abstraction layer
@@ -980,6 +980,17 @@ Providers: `openai`, `openai-compatible` (via `OPENAI_BASE_URL`), `anthropic`, `
 Default aliases:
 - `groq` → `https://api.groq.com/openai/v1` (uses `GROQ_API_KEY`)
 - `ollama` → `http://localhost:11434/v1` (no key required)
+
+Model discovery:
+```bash
+terminus ai prioritize --provider openai --list-models
+terminus ai prioritize --provider ollama --list-models
+```
+
+Strict JSON parsing:
+```bash
+terminus ai prioritize --db scan.db --provider groq --model llama-3.1-8b-instant --strict-json
+```
 
 ### Companion Python Script (Optional)
 The `athena.py` script analyzes JSON outputs when you prefer a standalone post-processing workflow.

@@ -9,6 +9,7 @@ pub mod diff;
 pub mod validate;
 pub mod campaign;
 pub mod extract;
+pub mod models;
 pub mod provider;
 pub mod prompts;
 pub mod rig_engine;
@@ -35,10 +36,18 @@ pub async fn run_ai(matches: &ArgMatches) -> Result<()> {
 }
 
 async fn run_mode(mode: &str, matches: &ArgMatches) -> Result<()> {
-    let db_path = matches.get_one::<String>("db").context("db is required")?;
     let provider = matches.get_one::<String>("provider").map(|s| s.as_str()).unwrap_or("openai");
     let model = matches.get_one::<String>("model").map(|s| s.as_str()).unwrap_or("gpt-4");
     let base_url = matches.get_one::<String>("base-url").cloned();
+    let list_models = matches.get_flag("list-models");
+    let strict_json = matches.get_flag("strict-json");
+
+    if list_models {
+        models::list_models(provider, base_url).await?;
+        return Ok(());
+    }
+
+    let db_path = matches.get_one::<String>("db").context("db is required")?;
     let max_findings = matches.get_one::<String>("max-findings").and_then(|s| s.parse().ok()).unwrap_or(10);
     let confidence_threshold = matches.get_one::<String>("confidence-threshold").and_then(|s| s.parse().ok()).unwrap_or(0.3);
     let include_raw = matches.get_flag("include-raw");
@@ -60,7 +69,11 @@ async fn run_mode(mode: &str, matches: &ArgMatches) -> Result<()> {
 
     let config = ProviderConfig::from_args(provider, model, base_url)?;
     let engine = RigReasoningEngine::new(config.clone());
-    let result = engine.run(task.clone()).await?;
+    let result = if strict_json {
+        engine.run_strict(task.clone()).await?
+    } else {
+        engine.run(task.clone()).await?
+    };
 
     output_result(&result);
     output_ai_assessment(db_path, provider, model, &result)?;

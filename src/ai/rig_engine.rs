@@ -13,11 +13,16 @@ impl RigReasoningEngine {
     pub fn new(config: ProviderConfig) -> Self {
         Self { config }
     }
-}
 
-#[async_trait::async_trait]
-impl ReasoningEngine for RigReasoningEngine {
-    async fn run(&self, task: ReasoningTask) -> Result<ReasoningResult> {
+    pub async fn run_strict(&self, task: ReasoningTask) -> Result<ReasoningResult> {
+        let response = self.run_raw(task).await?;
+        let sanitized = sanitize_json_response(&response);
+        let parsed: ReasoningResult = serde_json::from_str(&sanitized)
+            .context("Failed to parse strict AI response as ReasoningResult JSON")?;
+        Ok(parsed)
+    }
+
+    async fn run_raw(&self, task: ReasoningTask) -> Result<String> {
         let prompt = crate::ai::prompts::build_prompt(&task);
 
         let response: String = match self.config.kind {
@@ -62,6 +67,14 @@ impl ReasoningEngine for RigReasoningEngine {
             }
         };
 
+        Ok(response)
+    }
+}
+
+#[async_trait::async_trait]
+impl ReasoningEngine for RigReasoningEngine {
+    async fn run(&self, task: ReasoningTask) -> Result<ReasoningResult> {
+        let response = self.run_raw(task).await?;
         let sanitized = sanitize_json_response(&response);
         let parsed = parse_reasoning_result(&sanitized)
             .context("Failed to parse AI response as ReasoningResult JSON")?;

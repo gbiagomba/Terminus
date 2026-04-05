@@ -294,6 +294,8 @@ Examples:
 - `terminus ai prioritize --db scan.db --provider ollama --model qwen2.5-coder`
 - `terminus ai diff --db old.db --compare new.db --provider openai --model gpt-4.1`
 - `terminus ai validate --db scan.db --finding 42 --provider openai-compatible --base-url http://localhost:1234`
+- `terminus ai prioritize --provider openai --list-models`
+- `terminus ai prioritize --db scan.db --provider groq --model llama-3.1-8b-instant --strict-json`
 
 ============================================================
 AI IMPLEMENTATION REQUIREMENTS
