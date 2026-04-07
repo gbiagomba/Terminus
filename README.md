@@ -3,223 +3,41 @@
 # `terminus`
 ![GitHub](https://img.shields.io/github/license/Achiefs/fim) [![Tip Me via PayPal](https://img.shields.io/badge/PayPal-tip_me-green?logo=paypal)](paypal.me/gbiagomba)
 
-`terminus` is a command-line tool designed to test the accessibility of URLs without authentication, using various HTTP methods. It's particularly useful for identifying unprotected paths to web servers that require authentication, helping to expose potential security vulnerabilities. The tool supports individual URLs or lists from files, custom HTTP methods, multiple ports, and concurrent execution.
-
-## Table of Contents
-
-- [Features](#features)
-  - [Input Sources](#input-sources)
-  - [Output Options](#output-options)
-  - [HTTP Testing](#http-testing)
-  - [Advanced Features](#advanced-features)
-  - [Smart Analysis Features](#smart-analysis-features-v250)
-  - [Passive Security Analysis](#passive-security-analysis-v260)
-  - [HTTP/2 Desync Detection](#http2-desync-detection-v270)
-  - [Advanced Passive Vulnerability Detection](#advanced-passive-vulnerability-detection-v280)
-  - [Arbitrary Method Fuzzing](#arbitrary-method-fuzzing-v2120)
-  - [Interactive SQLite Mode](#interactive-sqlite-mode-v2120)
-  - [JavaScript Redirect Following](#javascript-redirect-following-v2130)
-  - [Async Transport & HTTP/3](#async-transport--http3-v310)
-  - [Enumeration](#enumeration-v340)
-  - [Deterministic Diff](#deterministic-diff-v340)
-  - [Manual Help](#manual-help-v340)
-- [Installation](#installation)
-  - [Using the Makefile](#using-the-makefile)
-- [Usage](#usage)
-  - [Examples](#examples)
-    - [Basic Usage](#basic-usage)
-    - [Input Format Examples](#input-format-examples)
-    - [Piping Examples](#piping-examples)
-    - [Output Format Examples](#output-format-examples)
-    - [Advanced Examples](#advanced-examples)
-    - [Smart Analysis Examples](#smart-analysis-examples-v250)
-    - [Passive Security Analysis Examples](#passive-security-analysis-examples-v260)
-    - [HTTP/2 Desync Detection Examples](#http2-desync-detection-examples-v270)
-    - [Advanced Passive Vulnerability Detection Examples](#advanced-passive-vulnerability-detection-examples-v280)
-- [AI-Powered Analysis](#ai-powered-analysis)
-- [HTTP Methods Tested](#http-methods-tested)
-- [Contributing](#contributing)
-- [License](#license)
+`terminus` is a command-line HTTP security scanner that tests URL accessibility across methods, detects passive and active vulnerabilities, enumerates subdomains and paths, diffs scan results, and reasons over findings with built-in AI. Built in Rust with async/HTTP/3 transport.
 
 ---
 
-## Features
+## Quick Start
 
-### Input Sources
-- **Single URL/IP Testing**: Test URLs or IP addresses (IPv4/IPv6) with the `-u` flag
-- **File Input**: Support for multiple input formats via `-f` flag:
-  - Plain text files with URLs/domains/IPs
-  - Nmap XML output (`-oX`)
-  - Nmap greppable output (`-oG`)
-  - testssl.sh JSON output
-  - ProjectDiscovery JSON (nuclei, katana)
-- **Stdin Pipe**: Chain tools together (e.g., `cat domains.txt | httpx | terminus`)
-- **IPv4/IPv6 Support**: Native support for both IPv4 and IPv6 addresses with `-6` flag
+```bash
+# Install
+cargo install --git https://github.com/gbiagomba/terminus.git
 
-### Output Options
-- **Multiple Output Formats**: stdout, txt, json, html, csv, sqlite, or all formats simultaneously
-- **Output Format Control**: Use `--output-format` to specify desired format(s)
-- **Custom Output Location**: Specify output file base name with `-o` flag
-- **Vulnerability Indicators**: All output formats (stdout, txt, csv, html, sqlite) display detected vulnerabilities with clear indicators
-- **Enhanced HTML Reports**: Interactive HTML reports with:
-  - Vulnerability summary dashboard with statistics
-  - JavaScript-powered filtering by vulnerability type
-  - Visual badges for detected issues (HTTP/2 Desync, Host Injection, XFF Bypass, CSRF, SSRF, Reflection, Arbitrary Method Accepted, Method Confusion, Security Issues, Error Messages)
-  - Clean/Pass indicators for endpoints with no vulnerabilities
-- **CSV Export**: Generate streamlined CSV files optimized for spreadsheet applications (response bodies removed for better compatibility)
-- **SQLite Database Export**: Export to queryable SQLite database for advanced analysis:
-  - Denormalized schema with 50+ columns for all scan results and vulnerabilities
-  - Automatic indexing on URL, status, timestamps, and vulnerability flags
-  - Query results with standard SQL (e.g., `SELECT url FROM scan_results WHERE csrf_suspected = 1`)
-  - Supports both `sqlite` and `db` format names
-  - Full response bodies and headers preserved for deep analysis
-  - Includes `arbitrary_method_used` column for fuzzed methods
-  - Optional interactive query shell via `terminus interact --db <SQLITE_FILE>`
-  - Schema versioning with `schema_version` table for migrations and extended persistence tables
-- **Shared Output Core**: Stdout/TXT/HTML/CSV render through a shared output-row model for consistent formatting across future subcommands
+# Scan a single target
+terminus scan -u https://example.com
 
-### HTTP Testing
-- **HTTP Methods**: Use any HTTP method with `-X` flag or `ALL` to test all predefined methods
-  - **Arbitrary Method Fuzzing**: Use `--fuzz-methods` with optional `--custom-method` / `--custom-methods-file` to test non-standard methods
-- **Smart Port Scanning**:
-  - Default: Scans ports 80 and 443 when no `-p` flag is specified
-  - Custom Ports: Specify comma-separated ports like `80,443,8080` with `-p` flag
-  - File-based: Automatically uses ports from nmap/testssl/nuclei scan outputs
-  - URL-embedded: Respects ports already specified in URLs (e.g., `http://example.com:8080`)
-- **HTTP Version Control**: Force HTTP/1.0, 1.1, 2.0, or 3.0 using `--http-version`
-  - **HTTP/3 Note**: HTTP/3 requires QUIC over HTTPS and does not support proxies. When `--http-version 3` is selected, Terminus uses its async QUIC transport; non-HTTPS URLs or proxy use will return a friendly error.
-- **Status Code Filtering**: Filter responses by status code using `-F`
+# Full vuln scan with all output formats
+terminus scan -f targets.txt --scan-level vuln --output-format all -o results
 
-### Advanced Features
-- **Concurrent Scanning**: Async concurrency with configurable task count using `-t/--threads` flag (default: 10)
-- **Proxy Support**: Route traffic through proxy tools like Burp Suite using `-x` flag
-- **Custom Headers**: Add headers via `-H` flag (multiple allowed) or `--header-file`
-- **Cookie Support**: Include cookies with `-b` flag or from file using `-c/--cookie-file`
-- **TLS/SSL Options**: Allow insecure connections with `-k` flag
-- **Redirect Handling**: Follow redirects with `-L` flag
-  - Follows standard HTTP `Location` redirects and common JavaScript-triggered redirects such as `window.location`, `location.href`, `location.assign()`, and `location.replace()`
-- **Verbose Output**: View detailed response headers with `-v` flag
-- **Scan Level Presets**: Predefined security scan configurations with `--scan-level` flag:
-  - `quick`: Basic HTTP requests only (default behavior)
-  - `standard`: Security headers, error detection, and reflection checks
-  - `full`: All features including body analysis and link extraction
-  - `vuln`: All vulnerability detection features (HTTP/2 desync, Host injection, XFF bypass, CSRF, SSRF)
-
-### Smart Analysis Features (v2.5.0)
-- **Smart Diffing**: Compare two scans and identify new/removed endpoints and status changes
-- **Pattern Matching**: Search for specific patterns in response bodies using regex
-- **Rate Limiting**: Control request rate for respectful scanning (e.g., `10/s`, `100/m`)
-- **Random Delays**: Add random delays between requests to avoid detection
-- **Body Analysis**: Analyze response body content with `--check-body`
-- **Link Extraction**: Automatically extract URLs from response bodies with `--extract-links`
-
-### Passive Security Analysis (v2.6.0)
-- **Security Headers Analysis**: Detect missing or misconfigured security headers (CSP, HSTS, X-Frame-Options, etc.)
-- **Error Message Detection**: Identify verbose error messages, SQL errors, stack traces, and path disclosure
-- **Reflection Detection**: Passive detection of input reflection and potential XSS vectors (no exploitation)
-
-### HTTP/2 Desync Detection (v2.7.0)
-- **HTTP/2 Downgrade Testing**: Compare HTTP/1.1 vs HTTP/2 responses to detect desync vulnerabilities (CWE-444)
-- **Request Smuggling Detection**: Identify potential HTTP request smuggling vectors from HTTP/2 to HTTP/1.1 translation
-- **CDN/Proxy Analysis**: Test for misconfiguration in CDN and reverse proxy HTTP/2 downgrade handling
-- **Status Code Comparison**: Detect discrepancies in status codes between HTTP versions
-- **Response Body Analysis**: Compare response body lengths and content for HTTP version differences
-
-### Advanced Passive Vulnerability Detection (v2.8.0)
-- **Host Header Injection Detection**: Passively detect Host header injection vulnerabilities (CWE-444) by checking if malicious host values are reflected in Location, Vary, or Set-Cookie headers
-- **X-Forwarded-For Bypass Detection**: Detect IP-based access control bypasses by comparing baseline requests with X-Forwarded-For header modifications
-- **CSRF Vulnerability Detection**: Passively identify missing CSRF protections including Origin/Referer validation, SameSite cookies, X-Frame-Options, and CSP headers
-- **SSRF Vulnerability Detection**: Detect potential Server-Side Request Forgery (CWE-918) vulnerabilities by identifying suspicious URL parameters and response indicators
-
-### Arbitrary Method Fuzzing (v2.12.0)
-- **Fuzz HTTP Methods**: Test intentionally nonsensical methods to identify method confusion and unexpected acceptance
-- **Indicators**:
-  - `[Arbitrary Method Accepted]` when a non-standard method returns 2xx/3xx
-  - `[Method Confusion Suspected]` when response status differs from baseline GET
-- **Custom Methods**: Add methods via `--custom-method` or `--custom-methods-file`
-
-### Active Exploit Modules (v3.6.0)
-- **Unified `--exploit` Flag**: Run one or more exploit modules in a single scan:
-  - `terminus scan -u https://target.com --exploit xss,sqli,open_redirect`
-  - `terminus scan -u https://target.com --exploit csrf,ssrf`
-- **Supported Modules**: `xss`, `sqli`, `open_redirect`, `csrf`, `ssrf`, `header`, `smuggling`
-- **Custom Payloads**: Provide a payload file (one per line) with `--payloads payloads.txt`
-  - Falls back to built-in canned payloads when the file is empty or not provided
-- **XSS Detection**: Injects payloads into query parameters and checks for reflection in the response body
-- **SQLi Detection**: Injects payloads and looks for database error strings in responses
-- **Open Redirect Detection**: Injects redirect payloads and inspects the `Location` response header
-
-### Interactive SQLite Mode (v2.12.0)
-- **TUI Mode (default)**: Use `terminus interact --db <SQLITE_FILE>` to launch the ratatui TUI
-  - Arrow keys to navigate rows
-  - `Enter` to inspect a row's full details
-  - `r` to replay the selected request
-  - `/` to enter search mode (filter by URL or method)
-  - `:open <id>` to open a specific scan by ID
-  - `:replay <id>` to replay a specific scan by ID
-  - `:filter status <code>` to filter by HTTP status code
-  - `?` for keyboard help
-  - `q` or `Esc` to quit
-- **REPL Mode**: Use `--no-tui` for the classic text-based REPL:
-  - `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`
-  - Pagination: 20-row pages with `--more` support
-
-### JavaScript Redirect Following (v2.13.0)
-- **Body-Driven Redirect Support**: When `-L` is enabled, Terminus also follows redirect targets embedded in response bodies
-- **Supported Patterns**: `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
-- **Relative URL Resolution**: Relative JavaScript/HTML redirect targets are resolved against the current response URL before being requested
-- **JS/HTML Redirect Heuristics**: Detects `location` assignments, bracketed `location["href"]`, inline event handlers, concatenated literals, `setTimeout`/`setInterval` redirects, and meta refresh tags when `-L` is enabled
-
-### Async Transport & HTTP/3 (v3.1.0)
-- **Async Transport Core**: Request execution moved to Tokio async with a transport abstraction layer
-- **HTTP/3 Support**: Real QUIC/HTTP/3 support via reqwest's HTTP/3 transport when `--http-version 3` is selected
-- **Graceful Degradation**: HTTP/3 emits friendly errors when unavailable (e.g., non-HTTPS targets or proxy usage)
-- **Build Note**: HTTP/3 relies on reqwest's unstable flag, enabled in `.cargo/config.toml` via `--cfg reqwest_unstable`
-
-### Enumeration (v3.4.0)
-- **Subdomains**: `terminus enum subdomains -d example.com -w words.txt`
-- **Paths**: `terminus enum paths -u https://example.com -w common.txt`
-- **Wildcard Suppression**: Default wildcard detection with `--no-wildcard` to disable
-- **Filters**: Status and content-length filters for precise results
-- **Output**: stdout, txt, json, html, csv, sqlite, all
-
-### Deterministic Diff (v3.4.0)
-- **Inputs**: JSON or SQLite (auto-detected)
-- **Findings**: New/removed endpoints, status changes, indicator deltas, header/body fingerprint changes, arbitrary method deltas
-- **Output**: stdout, json, csv, html, sqlite
-
-### Manual Help (v3.4.0)
-- **Help Topics**: `terminus help`, `terminus help scan`, `terminus help enum`, `terminus help diff`
-
-### Performance & Usability Enhancements (v2.9.0)
-- **Multi-threaded Scanning**: Concurrent request processing with configurable thread count (default: 10 threads) using Rayon for parallel execution
-- **Smart Default Port Scanning**: Automatically scans ports 80 and 443 when no ports specified, while respecting ports from file inputs (nmap/testssl/nuclei)
-- **Enhanced Vulnerability Reporting**: All output formats now display vulnerability indicators with clear, actionable information
-- **Interactive HTML Reports**: Complete redesign with vulnerability summary dashboard, JavaScript filtering by vulnerability type, and visual badges
-- **Improved CSV Export**: Added dedicated "Vulnerabilities" column for easy data analysis and reporting
-
-### Protocol Handling & Enhanced Reporting (v2.10.0)
-- **Smart Protocol/Port Handling**: Respects `https://` and `http://` schemes - HTTPS URLs default to port 443, HTTP URLs default to port 80, eliminating unnecessary duplicate requests
-- **Detailed Security Issue Reporting**: Security headers and error messages now display full details instead of just counts (e.g., `[Security: Missing X-Frame-Options]` instead of `[Security Issues: 3]`)
-- **Request/Response Columns**: Added dedicated columns in CSV and HTML outputs for full request headers and response bodies, enabling better analysis and debugging
-- **Proxy Support for Vulnerability Checks**: Fixed HTTP/2 desync checks to properly route through configured proxy (Burp Suite, etc.) ensuring all requests are visible in proxy tools
-- **HTTP/3 Preparation**: Infrastructure updates for future HTTP/3 support (currently experimental in reqwest library)
+# AI triage of findings
+terminus ai prioritize --db results.db --provider ollama
+```
 
 ---
 
 ## Installation
 
-Ensure Rust is installed on your system:
+Requires Rust:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-**Option 1: Install directly from GitHub** (recommended):
+**Option 1 — cargo install from GitHub** (recommended):
 ```bash
 cargo install --git https://github.com/gbiagomba/terminus.git
 ```
 
-**Option 2: Clone and build manually**:
+**Option 2 — clone and build**:
 ```bash
 git clone https://github.com/gbiagomba/terminus.git
 cd terminus
@@ -227,863 +45,224 @@ cargo build --release
 cargo install --path .
 ```
 
-**HTTP/3 build note**:
-Reqwest HTTP/3 requires `RUSTFLAGS="--cfg reqwest_unstable"`. This repo sets it in `.cargo/config.toml`, but if you build outside the repo or override flags, export it manually:
+**HTTP/3 note**: reqwest HTTP/3 requires `RUSTFLAGS="--cfg reqwest_unstable"`. This repo sets it in `.cargo/config.toml`. If you build outside the repo, export it manually:
 ```bash
 export RUSTFLAGS="--cfg reqwest_unstable"
 ```
 
-CI runs with `RUSTFLAGS="--cfg reqwest_unstable"` to ensure HTTP/3 builds are covered.
+### Makefile targets
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Compile the project |
+| `make run` | Run with default settings |
+| `make run-url` | Run against a specific URL, all methods |
+| `make run-file` | Run against a file of URLs, all methods |
+| `make install` | Install globally |
+| `make uninstall` | Remove global install |
+| `make clean` | Remove build artifacts |
 
 ---
 
-### Using the `Makefile`
+## Subcommands
 
-- **Build** the project:
-  ```bash
-  make build
-  ```
+| Subcommand | Description |
+|------------|-------------|
+| `scan` | Primary HTTP scanning engine |
+| `enum` | Subdomain and path enumeration |
+| `diff` | Compare two scan outputs |
+| `interact` | Interactive SQLite review (TUI + REPL) |
+| `ai` | AI decision-support over SQLite evidence |
+| `help` | Manual-style help (`terminus help scan`, etc.) |
 
-- **Run** the program with default settings:
-  ```bash
-  make run
-  ```
-
-- **Run** with a specific URL and test all HTTP methods:
-  ```bash
-  make run-url
-  ```
-
-- **Run** with a file of URLs and test all HTTP methods:
-  ```bash
-  make run-file
-  ```
-
-- **Install** the program globally:
-  ```bash
-  make install
-  ```
-
-- **Uninstall** the program:
-  ```bash
-  make uninstall
-  ```
-
-- **Clean** the project:
-  ```bash
-  make clean
-  ```
-  
 ---
 
-## Usage
+## Features
 
-```plaintext
-URL testing with support for multiple input formats (nmap, testssl, ProjectDiscovery), IPv4/IPv6, and various output formats
+### Input & Output
 
-Usage: terminus <SUBCOMMAND> [OPTIONS]
+**Input sources**:
+- `-u <URL>` — single URL or IP (IPv4/IPv6 with `-6`)
+- `-f <FILE>` — plain text, nmap XML/greppable, testssl.sh JSON, nuclei/katana JSON
+- stdin pipe — `cat domains.txt | httpx | terminus`
 
-Subcommands:
-  scan        Primary HTTP scanning engine
-  diff        Compare two scan outputs (JSON)
-  interact    Interactive SQLite review mode
-  help        Manual-style help
-  enum        Enumeration commands
-  ai          AI decision-support commands
+**Output formats** (`--output-format`):
+- `stdout`, `txt`, `json`, `html`, `csv`, `sqlite` / `db`, `all`
+- Use `-o <base>` to set the output file name (extension added automatically)
 
-Scan options:
-  -u, --url <URL>                  Specify a single URL/IP to check
-  -f, --file <FILE>                Input file (URLs, nmap XML/greppable, testssl JSON, nuclei/katana JSON)
-  -X, --method <METHOD>            Specify the HTTP method to use (default: GET). Use ALL to test all methods
-  -p, --port <PORTS>               Comma-separated ports to connect to (e.g., 80,443)
-  -6, --ipv6                       Enable IPv6 scanning
-  -k, --insecure                   Allow insecure SSL connections
-  -v, --verbose                    Enable verbose output with response headers
-  -L, --follow                     Follow HTTP redirects, including common JavaScript-triggered redirects
-  -o, --output <FILE>              Output file base name (extension added based on format)
-      --output-format <FORMAT>     Output format: stdout, txt, json, html, csv, sqlite/db, all (default: stdout)
-  -F, --filter-code <STATUS_CODE>  Filter results by HTTP status code
-  -x, --proxy <PROXY>              Specify proxy URL (e.g., http://127.0.0.1:8080 for Burp)
-  -H, --header <HEADER>            Add custom header (format: 'Name: Value'). Can be specified multiple times
-      --header-file <FILE>         Read headers from file (one per line, format: 'Name: Value')
-  -b, --cookie <COOKIE>            Add cookie string (format: 'name1=value1; name2=value2')
-  -c, --cookie-file <FILE>         Read cookies from file
-      --http-version <VERSION>     Force HTTP version (1.0, 1.1, 2, or 3)
-      --diff <FILE>                Compare results with previous scan (JSON file)
-      --grep-response <PATTERN>    Search for pattern in response body (regex supported)
-      --rate-limit <RATE>          Rate limit requests (e.g., '10/s', '100/m')
-      --random-delay <RANGE>       Random delay between requests in seconds (e.g., '1-5')
-      --check-body                 Analyze response body content
-      --extract-links              Extract and display links from response body
-      --check-security-headers     Analyze security headers (CSP, HSTS, X-Frame-Options, etc.)
-      --detect-errors              Detect verbose error messages (SQL, stack traces, etc.)
-      --detect-reflection          Check if input is reflected in response (passive XSS detection)
-      --http2-desync-check         Test HTTP/2 to HTTP/1.1 downgrade handling (detects potential request smuggling)
-      --detect-host-injection      Passively detect Host header injection vulnerabilities by checking response headers
-      --detect-xff-bypass          Detect X-Forwarded-For bypass by comparing baseline and XFF requests
-      --detect-csrf                Passively detect potential CSRF vulnerabilities and missing protections
-      --detect-ssrf                Passively detect potential SSRF vulnerabilities in URL parameters
-      --scan-level <LEVEL>         Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)
-  -t, --threads <NUM>              Number of concurrent threads for scanning (default: 10)
-      --fuzz-methods               Enable arbitrary HTTP method fuzzing
-      --custom-method <METHOD>     Add one or more arbitrary HTTP methods for fuzzing (can be specified multiple times)
-      --custom-methods-file <FILE> Load arbitrary HTTP methods from a file (one per line)
-  -h, --help                       Print help
-  -V, --version                    Print version
+**HTML reports**: vulnerability summary dashboard, JS-powered filtering by type, visual badges per finding.
 
-```
+**SQLite**: 50+ column denormalized schema, automatic indexes, schema versioning, queryable with standard SQL or via `terminus interact`.
 
-### Examples
+---
 
-#### Basic Usage
+### Scanning
 
-**Test a single URL (scans both port 80 and 443 by default)**:
-```bash
-terminus scan -u http://example.com
-```
+- **HTTP methods**: `-X <METHOD>` or `-X ALL` to test all predefined methods
+- **Ports**: `-p 80,443,8080` (defaults to 80 + 443; file inputs use embedded ports automatically)
+- **Protocol version**: `--http-version 1.0|1.1|2|3`
+- **Concurrency**: `-t <N>` async tasks (default: 10)
+- **Proxy**: `-x http://127.0.0.1:8080` (Burp Suite, etc.)
+- **TLS**: `-k` to allow insecure connections
+- **Headers**: `-H "Name: Value"` (repeatable) or `--header-file`
+- **Cookies**: `-b "name=val"` or `-c/--cookie-file`
+- **Redirects**: `-L` follows HTTP `Location` and JavaScript-triggered redirects (`window.location`, `location.href`, `location.assign()`, `location.replace()`, meta refresh)
+- **Rate limiting**: `--rate-limit 10/s` or `100/m`; `--random-delay 1-5` for random gaps
+- **Verbose**: `-v` shows full response headers
 
-**Test an IPv4 address (scans ports 80 and 443)**:
-```bash
-terminus scan -u 192.168.1.1
-```
+**Scan level presets** (`--scan-level`):
 
-**Test an IPv6 address**:
-```bash
-terminus scan -u "2001:db8::1" -6
-```
+| Level | What it enables |
+|-------|----------------|
+| `quick` | Basic HTTP requests only (fastest) |
+| `standard` | Security headers + error detection + reflection |
+| `full` | All features including body analysis and link extraction |
+| `vuln` | All passive vulnerability detection |
 
-**Test with custom ports**:
-```bash
-terminus scan -u http://example.com -p 8080,8443
-```
+---
 
-**Test multiple URLs from a file**:
-```bash
-terminus scan -f urls.txt -X ALL
-```
+### Passive Analysis
 
-**Test specific ports only**:
-```bash
-terminus scan -f urls.txt -p 80,443,8080 -X ALL
-```
+- **Security headers**: detect missing/misconfigured CSP, HSTS, X-Frame-Options, etc. (`--check-security-headers`)
+- **Error messages**: SQL errors, stack traces, path disclosure (`--detect-errors`)
+- **Reflection**: passive input-reflection / XSS indicator detection (`--detect-reflection`)
+- **Body analysis**: `--check-body`, `--extract-links`, `--grep-response <regex>`
 
-#### Input Format Examples
+---
 
-**Parse nmap XML output (uses ports from nmap scan)**:
-```bash
-nmap -p80,443,8080 -oX scan.xml target.com
-terminus scan -f scan.xml
-```
+### Active Exploits
 
-**Parse nmap greppable output (uses ports from nmap scan)**:
-```bash
-nmap -p80,443 -oG scan.gnmap target.com
-terminus scan -f scan.gnmap
-```
+Use `--exploit <module[,module]>` to run active exploit modules. Combine with `--payloads <file>` for custom payload lists (falls back to built-in payloads when omitted).
 
-**Parse testssl.sh JSON output (uses ports from testssl scan)**:
-```bash
-testssl --json-pretty target.com > testssl.json
-terminus scan -f testssl.json
-```
-
-**Parse ProjectDiscovery tool output (uses discovered URLs with ports)**:
-```bash
-echo "target.com" | katana -json -o katana.json
-terminus scan -f katana.json
-```
-
-**Note**: When using file inputs, Terminus automatically uses the ports specified in the scan output. No `-p` flag needed!
-
-#### Piping Examples
-
-**Chain with other tools**:
-```bash
-cat domains.txt | httpx | terminus
-```
-
-**Complex pipeline with nuclei**:
-```bash
-cat domains.txt | httpx -silent | nuclei -t cves/ -json | terminus
-```
-
-**Chain with subfinder and httprobe**:
-```bash
-subfinder -d target.com -silent | httprobe | terminus --output-format json -o results
-```
-
-#### Output Format Examples
-
-**Output to JSON**:
-```bash
-terminus scan -u http://example.com --output-format json -o scan_results
-```
-
-**Output to HTML**:
-```bash
-terminus scan -f urls.txt --output-format html -o scan_results
-```
-
-**Output to CSV**:
-```bash
-terminus scan -f urls.txt --output-format csv -o scan_results
-```
-
-**Output to SQLite database**:
-```bash
-# Basic SQLite export
-terminus scan -f urls.txt --output-format sqlite -o scan_results
-
-# Query the database with standard SQL
-sqlite3 scan_results.db "SELECT url, status, port FROM scan_results WHERE status >= 400;"
-
-# Find all endpoints with vulnerabilities
-sqlite3 scan_results.db "SELECT url, method FROM scan_results WHERE
-  http2_desync_detected = 1 OR
-  host_injection_suspected = 1 OR
-  csrf_suspected = 1 OR
-  ssrf_suspected = 1;"
-
-# Export specific columns to CSV from database
-sqlite3 -header -csv scan_results.db "SELECT url, status, port FROM scan_results;" > filtered_results.csv
-
-# Can also use 'db' as format name
-terminus scan -f urls.txt --output-format db -o scan_results
-
-# Interactive query shell
-terminus interact --db scan_results.db
-```
-
-**Output to all formats**:
-```bash
-# Creates .txt, .json, .html, .csv, and .db files
-terminus scan -f urls.txt --output-format all -o scan_results
-```
-
-#### Advanced Examples
-
-**Test with proxy (Burp Suite)**:
-```bash
-terminus scan -u https://example.com -x http://127.0.0.1:8080 -k
-```
-
-**Follow JavaScript-triggered redirects**:
-```bash
-terminus scan -u https://example.com/login -L
-```
-
-**Test with custom headers**:
-```bash
-terminus scan -u https://example.com -H "Authorization: Bearer token123" -H "X-Custom: value"
-```
-
-**Test with cookies**:
-```bash
-terminus scan -u https://example.com -b "session=abc123; user=admin"
-```
-
-**Force HTTP/2**:
-```bash
-terminus scan -u https://example.com --http-version 2
-```
-
-**Complete pentest workflow**:
-```bash
-terminus scan -u https://api.example.com -X POST \
-  -H "Content-Type: application/json" \
-  -b "session=xyz789" \
-  -x http://127.0.0.1:8080 \
-  -k -v -L \
-  --http-version 2 \
-  --output-format all \
-  -o pentest_results
-```
-
-**Scan Level Preset Examples**:
-```bash
-# Quick scan - basic requests only (fastest)
-terminus scan -f urls.txt --scan-level quick
-
-# Standard scan - security headers, errors, and reflection detection
-terminus scan -f production_urls.txt --scan-level standard -o standard_scan
-
-# Full scan - all features including body analysis
-terminus scan -f targets.txt --scan-level full --rate-limit 10/s -o full_scan
-
-# Vulnerability scan - all passive vulnerability detection
-terminus scan -f api_endpoints.txt --scan-level vuln -k -o vuln_scan
-
-# Override preset with individual flags
-terminus scan -f urls.txt --scan-level standard --detect-host-injection -o custom_scan
-
-# Combine preset with other flags
-terminus scan -f targets.txt --scan-level vuln --rate-limit 5/s --random-delay 2-4 -o comprehensive_scan
-```
-
-#### Arbitrary Method Fuzzing Examples (v2.12.0)
-
-**Fuzz predefined arbitrary methods**:
-```bash
-terminus scan -u https://example.com --fuzz-methods -k
-```
-
-**Add custom arbitrary methods**:
-```bash
-terminus scan -u https://example.com --fuzz-methods --custom-method BOUNCE --custom-method SPLAT -k
-```
-
-**Load methods from file**:
-```bash
-terminus scan -u https://example.com --fuzz-methods --custom-methods-file methods.txt -k
-```
-
-#### Interactive SQLite Examples (v2.12.0)
+| Module | What it tests |
+|--------|--------------|
+| `xss` | Injects payloads into query params, checks for reflection |
+| `sqli` | Injects payloads, looks for DB error strings |
+| `open_redirect` | Injects redirect payloads, inspects `Location` header |
+| `csrf` | Active CSRF protection checks |
+| `ssrf` | SSRF indicator detection via URL parameters |
+| `header` | Header injection payloads |
+| `smuggling` | HTTP request smuggling probes |
 
 ```bash
-terminus interact --db scan_results.db
-
-terminus> list urls
-terminus> find status 403
-terminus> find exploit csrf
-terminus> show scan 42
-terminus> show raw 42
-terminus> --more
-terminus> exit
+terminus scan -u https://target.com --exploit xss,sqli,open_redirect -k
+terminus scan -u https://target.com --exploit xss --payloads payloads.txt -k
 ```
 
-**Concurrent Scanning with Threading**:
+---
+
+### Enumeration
+
 ```bash
-# Fast scan with 20 concurrent threads
-terminus scan -f large_url_list.txt -t 20 -o fast_scan
-
-# Balanced scanning with 10 threads (default)
-terminus scan -f urls.txt --scan-level vuln -o balanced_scan
-
-# Conservative scanning with 5 threads for production
-terminus scan -f production_endpoints.txt -t 5 --rate-limit 10/s -o conservative_scan
-
-# Maximum speed scan with 50 threads
-terminus scan -f urls.txt -t 50 --output-format all -o speed_scan
-
-# Thread control with vulnerability detection
-terminus scan -f targets.txt \
-  -t 15 \
-  --scan-level vuln \
-  --rate-limit 20/s \
-  --output-format json \
-  -o threaded_vuln_scan
+terminus enum subdomains -d example.com -w words.txt
+terminus enum paths -u https://example.com -w common.txt
 ```
 
-#### Smart Analysis Examples (v2.5.0)
+- Wildcard suppression on by default (`--no-wildcard` to disable)
+- Filters: `-F <status>` (status code), content-length
+- Output formats: stdout, txt, json, html, csv, sqlite, all
 
-**Compare two scans to identify changes**:
+---
+
+### Diff
+
+Compare two scans (JSON or SQLite, auto-detected):
+
 ```bash
-# First scan
-terminus scan -f targets.txt --output-format json -o scan1
-
-# Second scan (after changes)
-terminus scan -f targets.txt --output-format json -o scan2
-
-# Compare scans
-terminus scan -f targets.txt --diff scan1.json -o scan2
-
-# Or use the diff subcommand directly
-terminus diff --base scan1.json --compare scan2.json
+terminus diff --base scan1.json --compare scan2.json --output-format html -o delta
 ```
 
-**Search for sensitive patterns in responses**:
+Detects: new/removed endpoints, status changes, indicator deltas, header/body fingerprint changes, method-acceptance deltas.
+
+---
+
+### Interact
+
+Launch the TUI (default) or REPL against a SQLite scan database:
+
 ```bash
-# Find admin panels or config files
-terminus scan -f urls.txt --grep-response "admin|backup|config|\.env"
-
-# Find API keys or tokens
-terminus scan -f api_endpoints.txt --grep-response "[Aa]pi[_-]?[Kk]ey|[Tt]oken|[Ss]ecret"
-
-# Search for specific error messages
-terminus scan -f urls.txt --grep-response "SQL syntax|mysql_fetch|ORA-[0-9]+"
+terminus interact --db results.db          # TUI
+terminus interact --db results.db --no-tui # REPL
 ```
 
-**Rate-limited scanning for production environments**:
-```bash
-# 10 requests per second
-terminus scan -f production_urls.txt --rate-limit 10/s
+**TUI keybindings**:
 
-# 100 requests per minute
-terminus scan -f large_list.txt --rate-limit 100/m
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate rows |
+| `Enter` | Inspect full row details |
+| `r` | Replay selected request |
+| `/` | Search (filter by URL or method) |
+| `:open <id>` | Open scan by ID |
+| `:replay <id>` | Replay scan by ID |
+| `:filter status <code>` | Filter by HTTP status code |
+| `?` | Keyboard help |
+| `q` / `Esc` | Quit |
 
-# Combine with random delays for stealth
-terminus scan -f targets.txt --rate-limit 5/s --random-delay 1-3
-```
+**REPL commands**: `list urls`, `list methods`, `find status <CODE>`, `find exploit <TYPE>`, `show scan <ID>`, `show raw <ID>`, `--more` (pagination), `exit`.
 
-**Analyze response bodies and extract links**:
-```bash
-# Check response body content
-terminus scan -u https://example.com --check-body -v
+---
 
-# Extract all links from response
-terminus scan -u https://example.com --extract-links
+### AI Analysis
 
-# Combine with grep for specific content
-terminus scan -f urls.txt --check-body --grep-response "password|credential" -o findings
-```
+Built-in Rust AI pipeline (`terminus ai`) reasons over SQLite evidence using any of seven LLM providers:
 
-**Advanced reconnaissance workflow**:
-```bash
-# Scan with body analysis and link extraction
-terminus scan -f targets.txt \
-  --check-body \
-  --extract-links \
-  --grep-response "api|v[0-9]|admin" \
-  --rate-limit 20/s \
-  --output-format all \
-  -o recon_results
-
-# Compare with previous scan
-terminus scan -f targets.txt \
-  --diff recon_results.json \
-  --check-body \
-  -o new_scan
-```
-
-#### Passive Security Analysis Examples (v2.6.0)
-
-**Analyze security headers**:
-```bash
-# Check for missing or misconfigured security headers
-terminus scan -f production_urls.txt --check-security-headers -o security_audit
-
-# Combine with JSON output for detailed analysis
-terminus scan -u https://example.com --check-security-headers --output-format json -o headers_check
-```
-
-**Detect verbose error messages**:
-```bash
-# Scan for SQL errors, stack traces, and debug information
-terminus scan -f urls.txt --detect-errors
-
-# Find specific error types with grep
-terminus scan -f api_endpoints.txt --detect-errors --grep-response "SQL|Exception|Traceback"
-
-# Export error findings to CSV for reporting
-terminus scan -f targets.txt --detect-errors --output-format csv -o error_findings
-```
-
-**Passive reflection detection (XSS indicators)**:
-```bash
-# Check for potential XSS vectors without exploitation
-terminus scan -f forms_urls.txt --detect-reflection
-
-# Combine with error detection for comprehensive analysis
-terminus scan -u https://webapp.com/search --detect-reflection --detect-errors -v
-```
-
-**Comprehensive security audit workflow**:
-```bash
-# Full passive security assessment
-terminus scan -f target_list.txt \
-  --check-security-headers \
-  --detect-errors \
-  --detect-reflection \
-  --check-body \
-  --extract-links \
-  --rate-limit 10/s \
-  --output-format all \
-  -o security_assessment
-
-# Then analyze with AI for insights
-python athena.py security_assessment.json \
-  --provider ollama \
-  --persona security \
-  -o security_report.txt
-```
-
-**Enterprise security scanning**:
-```bash
-# Respectful production scanning with all security checks
-terminus scan -f production_endpoints.txt \
-  --check-security-headers \
-  --detect-errors \
-  --detect-reflection \
-  --rate-limit 5/s \
-  --random-delay 2-5 \
-  -k \
-  --output-format json \
-  -o prod_security_scan
-
-# Compare with baseline
-terminus scan -f production_endpoints.txt \
-  --check-security-headers \
-  --detect-errors \
-  --diff prod_security_scan.json \
-  -o latest_scan
-```
-
-#### HTTP/2 Desync Detection Examples (v2.7.0)
-
-**Test HTTP/2 to HTTP/1.1 downgrade handling**:
-```bash
-# Basic HTTP/2 desync check on a single target
-terminus scan -u https://api.example.com --http2-desync-check -k
-
-# Check multiple endpoints for desync vulnerabilities
-terminus scan -f https_endpoints.txt --http2-desync-check --output-format json -o desync_scan
-```
-
-**Detect request smuggling vectors**:
-```bash
-# Test for HTTP/2 downgrade issues with specific HTTP methods
-terminus scan -u https://target.com/api/endpoint \
-  -X POST \
-  --http2-desync-check \
-  -k \
-  --output-format json \
-  -o smuggling_test
-
-# Test multiple methods for desync vulnerabilities
-terminus scan -u https://api.target.com \
-  -X ALL \
-  --http2-desync-check \
-  --rate-limit 5/s \
-  -k \
-  -o method_desync_scan
-```
-
-**Combine with other security checks**:
-```bash
-# Comprehensive HTTP/2 security assessment
-terminus scan -f production_apis.txt \
-  --http2-desync-check \
-  --check-security-headers \
-  --detect-errors \
-  --check-body \
-  --rate-limit 10/s \
-  --output-format all \
-  -k \
-  -o http2_security_audit
-
-# Proxy through Burp Suite for manual analysis
-terminus scan -u https://target.com/vulnerable/endpoint \
-  --http2-desync-check \
-  -x http://127.0.0.1:8080 \
-  -k \
-  -v \
-  --output-format json \
-  -o burp_desync_test
-```
-
-**Enterprise CDN/proxy testing**:
-```bash
-# Test CDN endpoints for HTTP/2 downgrade issues
-terminus scan -f cdn_endpoints.txt \
-  --http2-desync-check \
-  --rate-limit 5/s \
-  --random-delay 2-4 \
-  -k \
-  --output-format json \
-  -o cdn_desync_scan
-
-# Compare desync results over time
-terminus scan -f api_endpoints.txt \
-  --http2-desync-check \
-  --diff previous_desync_scan.json \
-  -k \
-  -o latest_desync_scan
-
-# Test with custom headers to bypass WAF/CDN
-terminus scan -u https://target.com/api \
-  --http2-desync-check \
-  -H "X-Forwarded-For: 127.0.0.1" \
-  -H "User-Agent: Mozilla/5.0" \
-  -k \
-  --output-format json \
-  -o waf_bypass_desync_test
-```
-
-**Automated desync detection workflow**:
-```bash
-# Full HTTP/2 desync assessment pipeline
-echo "target.com" | httpx -silent | \
-terminus scan --http2-desync-check \
-  --check-security-headers \
-  --detect-errors \
-  --rate-limit 10/s \
-  -k \
-  --output-format json \
-  -o desync_findings
-
-# Analyze findings with AI
-python athena.py desync_findings.json \
-  --provider ollama \
-  --persona security \
-  -o desync_analysis.txt
-```
-
-#### Advanced Passive Vulnerability Detection Examples (v2.8.0)
-
-**Test for Host Header Injection**:
-```bash
-# Basic Host header injection detection
-terminus scan -u https://example.com --detect-host-injection -k
-
-# Test multiple endpoints for host injection
-terminus scan -f endpoints.txt --detect-host-injection --output-format json -o host_injection_scan
-
-# Combine with verbose output to see response headers
-terminus scan -u https://target.com/api \
-  --detect-host-injection \
-  -v \
-  -k \
-  --output-format json \
-  -o host_injection_detailed
-```
-
-**Detect X-Forwarded-For Bypasses**:
-```bash
-# Check for XFF bypass on protected endpoints
-terminus scan -u https://admin.example.com --detect-xff-bypass -k
-
-# Test multiple protected paths
-terminus scan -f admin_endpoints.txt \
-  --detect-xff-bypass \
-  --rate-limit 5/s \
-  --output-format json \
-  -o xff_bypass_scan
-
-# Test with different HTTP methods
-terminus scan -u https://api.target.com/admin \
-  -X ALL \
-  --detect-xff-bypass \
-  -k \
-  --output-format json \
-  -o xff_method_scan
-```
-
-**Detect CSRF Vulnerabilities**:
-```bash
-# Test for CSRF on state-changing endpoints
-terminus scan -u https://example.com/api/update -X POST --detect-csrf -k
-
-# Scan multiple POST/PUT/DELETE endpoints
-terminus scan -f state_changing_endpoints.txt \
-  -X POST \
-  --detect-csrf \
-  --output-format json \
-  -o csrf_scan
-
-# Comprehensive CSRF testing with all methods
-terminus scan -f api_endpoints.txt \
-  -X ALL \
-  --detect-csrf \
-  --rate-limit 10/s \
-  -k \
-  --output-format all \
-  -o csrf_comprehensive_scan
-```
-
-**Detect SSRF Vulnerabilities**:
-```bash
-# Test endpoints with URL parameters for SSRF
-terminus scan -u "https://example.com/proxy?url=http://internal" --detect-ssrf -k
-
-# Scan endpoints that might be vulnerable to SSRF
-terminus scan -f urls_with_params.txt \
-  --detect-ssrf \
-  --output-format json \
-  -o ssrf_scan
-
-# Test API endpoints for SSRF indicators
-terminus scan -f api_endpoints.txt \
-  --detect-ssrf \
-  --check-body \
-  --rate-limit 5/s \
-  -k \
-  --output-format json \
-  -o ssrf_detailed_scan
-```
-
-**Comprehensive Vulnerability Assessment**:
-```bash
-# Full passive vulnerability scan with all v2.8.0 features
-terminus scan -f target_list.txt \
-  --detect-host-injection \
-  --detect-xff-bypass \
-  --detect-csrf \
-  --detect-ssrf \
-  --http2-desync-check \
-  --check-security-headers \
-  --detect-errors \
-  --detect-reflection \
-  --rate-limit 10/s \
-  -k \
-  --output-format all \
-  -o comprehensive_vuln_scan
-
-# Then analyze with AI
-python athena.py comprehensive_vuln_scan.json \
-  --provider ollama \
-  --persona security \
-  -o vulnerability_analysis.txt
-```
-
-**Enterprise Security Testing Workflow**:
-```bash
-# Stage 1: Reconnaissance with all detection features
-terminus scan -f production_apps.txt \
-  --detect-host-injection \
-  --detect-xff-bypass \
-  --detect-csrf \
-  --detect-ssrf \
-  --http2-desync-check \
-  --check-security-headers \
-  --detect-errors \
-  --check-body \
-  --extract-links \
-  --rate-limit 5/s \
-  --random-delay 2-4 \
-  -k \
-  --output-format json \
-  -o enterprise_scan_stage1
-
-# Stage 2: Deep analysis of findings
-python athena.py enterprise_scan_stage1.json \
-  --provider anthropic \
-  --persona security \
-  -o security_findings.txt
-
-# Stage 3: Compare with previous scan
-terminus scan -f production_apps.txt \
-  --detect-host-injection \
-  --detect-xff-bypass \
-  --detect-csrf \
-  --detect-ssrf \
-  --diff enterprise_scan_stage1.json \
-  -k \
-  -o enterprise_scan_stage2
-```
-
-**Targeted Testing Examples**:
-```bash
-# Test only for bypass techniques (XFF and Host Injection)
-terminus scan -f protected_endpoints.txt \
-  --detect-host-injection \
-  --detect-xff-bypass \
-  -k \
-  --output-format json \
-  -o bypass_techniques_scan
-
-# Test only for injection vulnerabilities (CSRF and SSRF)
-terminus scan -f api_endpoints.txt \
-  -X POST \
-  --detect-csrf \
-  --detect-ssrf \
-  --rate-limit 10/s \
-  -k \
-  --output-format json \
-  -o injection_vulns_scan
-
-# Proxy through Burp for manual review
-terminus scan -u https://target.com/vulnerable/endpoint \
-  --detect-host-injection \
-  --detect-xff-bypass \
-  --detect-csrf \
-  --detect-ssrf \
-  -x http://127.0.0.1:8080 \
-  -k \
-  -v \
-  --output-format json \
-  -o burp_manual_review
-```
-
-## AI-Powered Analysis
-
-Terminus includes a built-in Rust AI pipeline for SQLite evidence and an optional companion Python script for JSON scan analysis.
-
-### Built-in AI Subcommand (v3.5.0)
-Use the Rust AI pipeline to reason over SQLite evidence:
+| Provider | Notes |
+|----------|-------|
+| `openai` | Requires `OPENAI_API_KEY` |
+| `openai-compatible` | Custom base URL via `OPENAI_BASE_URL` |
+| `anthropic` | Requires `ANTHROPIC_API_KEY` |
+| `gemini` | Requires `GEMINI_API_KEY` |
+| `cohere` | Requires `COHERE_API_KEY` |
+| `groq` | `https://api.groq.com/openai/v1`, requires `GROQ_API_KEY` |
+| `ollama` | `http://localhost:11434/v1`, no key required |
 
 ```bash
 terminus ai prioritize --db scan.db --provider openai --model gpt-4o
-```
-
-Providers: `openai`, `openai-compatible` (via `OPENAI_BASE_URL`), `anthropic`, `gemini`, `cohere`, `groq`, `ollama`.
-Default aliases:
-- `groq` → `https://api.groq.com/openai/v1` (uses `GROQ_API_KEY`)
-- `ollama` → `http://localhost:11434/v1` (no key required)
-
-Model discovery:
-```bash
-terminus ai prioritize --provider openai --list-models
 terminus ai prioritize --provider ollama --list-models
-terminus ai prioritize --provider openai --list-models --list-models-format json
-terminus ai prioritize --provider openai --list-models --list-models-format csv -o models
-```
-
-Strict JSON parsing:
-```bash
 terminus ai prioritize --db scan.db --provider groq --model llama-3.1-8b-instant --strict-json
 ```
 
-### Companion Python Script (Optional)
-The `athena.py` script analyzes JSON outputs when you prefer a standalone post-processing workflow.
+**Optional companion**: `athena.py` is a standalone Python script for post-processing JSON scan output (see [docs/EXAMPLES.md](docs/EXAMPLES.md#ai-analysis) for usage).
 
-### Features
-- **Local AI Providers**: Ollama, LM Studio, vLLM
-- **Cloud AI Providers**: OpenAI, Anthropic Claude, Google Gemini
-- **Multiple Personas**:
-  - Security Engineer (default): Focus on vulnerabilities and security hardening
-  - Developer: Focus on bugs, code-level fixes, and API design
-  - Technical Program Manager: Focus on business impact and project decisions
+---
 
-### Installation
+## Examples
+
+Full cookbook in **[docs/EXAMPLES.md](docs/EXAMPLES.md)**. Quick references:
+
 ```bash
-pip install -r requirements.txt
-```
+# Scan with proxy through Burp Suite
+terminus scan -u https://example.com -x http://127.0.0.1:8080 -k -v
 
-### Usage Examples
+# Passive vulnerability sweep
+terminus scan -f targets.txt \
+  --detect-host-injection --detect-xff-bypass \
+  --detect-csrf --detect-ssrf --http2-desync-check \
+  --rate-limit 10/s -k --output-format all -o vuln_sweep
 
-**Analyze with Ollama (local)**:
-```bash
-python athena.py scan_results.json --provider ollama --persona security
-```
+# Active exploit scan with custom payloads
+terminus scan -u https://target.com --exploit xss,sqli --payloads payloads.txt -k
 
-**Analyze with specific model**:
-```bash
-python athena.py scan_results.json --provider ollama --model llama3 --persona developer
-```
+# Subdomains + paths enumeration
+terminus enum subdomains -d target.com -w subdomains.txt
+terminus enum paths -u https://target.com -w common.txt
 
-**Analyze with OpenAI**:
-```bash
-export OPENAI_API_KEY=sk-...
-python athena.py scan_results.json --provider openai --persona tpm
-```
+# Compare two scans
+terminus diff --base scan1.json --compare scan2.json
 
-**Analyze with Anthropic Claude**:
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-python athena.py scan_results.json --provider anthropic --persona security
-```
+# AI triage
+terminus ai prioritize --db results.db --provider ollama
 
-**Save analysis to file**:
-```bash
-python athena.py scan_results.json \
-  --provider ollama \
-  --persona security \
-  --output analysis_report.txt
-```
-
-**Custom local AI server**:
-```bash
-python athena.py scan_results.json \
-  --provider lmstudio \
-  --base-url http://localhost:1234 \
-  --persona developer
+# Pipe from subfinder → httpx → terminus
+subfinder -d target.com -silent | httprobe | terminus --output-format json -o results
 ```
 
 ---
 
 ## HTTP Methods Tested
 
-When using the `-X ALL` flag, the following HTTP methods are tested:
+When using `-X ALL`, the following methods are tested:
 
 ```
 ACL, BASELINE-CONTROL, BCOPY, BDELETE, BMOVE, BPROPFIND, BPROPPATCH,
@@ -1095,20 +274,20 @@ SEARCH, SUBSCRIBE, TRACE, UNCHECKOUT, UNLOCK, UNSUBSCRIBE,
 UPDATE, VERSION-CONTROL, X-MS-ENUMATTS
 ```
 
-When using `--fuzz-methods`, Terminus also includes arbitrary methods such as:
-```
-BILBAO, FOOBAR, CATS, TERMINUS, PUZZLE, HELLO
-```
-You can add more with `--custom-method` and `--custom-methods-file`.
+When using `--fuzz-methods`, arbitrary methods are also tested (e.g., `BILBAO`, `FOOBAR`, `CATS`, `TERMINUS`, `PUZZLE`, `HELLO`). Extend with `--custom-method` or `--custom-methods-file`.
+
+Indicators:
+- `[Arbitrary Method Accepted]` — non-standard method returned 2xx/3xx
+- `[Method Confusion Suspected]` — response status differs from baseline GET
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+Contributions welcome — open a PR or file an issue.
 
 ---
 
 ## License
 
-GPL-3.0 License. For more details, see the [LICENSE](LICENSE) file.
+GPL-3.0. See [LICENSE](LICENSE).
