@@ -40,6 +40,7 @@ test_output.html
 
 # Local development tracking (not for version control)
 .version-tracking.md
+Master_prompt.md
 
 # IDE files
 .vscode/

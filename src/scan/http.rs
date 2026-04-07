@@ -1,0 +1,312 @@
+use regex::Regex;
+use std::str::FromStr;
+use url::Url;
+use http::header::{HeaderName, HeaderValue};
+
+pub fn build_full_url(url: &str, port: u16) -> String {
+    if let Ok(mut parsed) = Url::parse(url) {
+        if parsed.port().is_some() {
+            return parsed.to_string();
+        }
+        let is_standard_port = (parsed.scheme() == "https" && port == 443)
+            || (parsed.scheme() == "http" && port == 80);
+        if is_standard_port {
+            return parsed.to_string();
+        }
+        let _ = parsed.set_port(Some(port));
+        return parsed.to_string();
+    }
+
+    let is_https = url.starts_with("https://");
+    let is_http = url.starts_with("http://");
+    let is_standard_port = (is_https && port == 443) || (is_http && port == 80);
+
+    if is_standard_port {
+        url.to_string()
+    } else {
+        format!("{}:{}", url, port)
+    }
+}
+
+pub fn normalize_method(method: &str) -> String {
+    let trimmed = method.trim();
+    if trimmed.is_empty() {
+        return "GET".to_string();
+    }
+
+    trimmed.to_uppercase()
+}
+
+pub fn flatten_headers(headers: &[(String, String)]) -> String {
+    headers
+        .iter()
+        .map(|(k, v)| format!("{}:{}", k, v))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn parse_header(header_str: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = header_str.splitn(2, ':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let key = parts[0].trim();
+    let value = parts[1].trim();
+
+    match (HeaderName::from_str(key), HeaderValue::from_str(value)) {
+        (Ok(_), Ok(_)) => Some((key.to_string(), value.to_string())),
+        _ => None,
+    }
+}
+
+pub fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+pub fn upsert_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let mut replaced = false;
+    for (key, val) in headers.iter_mut() {
+        if key.eq_ignore_ascii_case(name) {
+            *val = value.to_string();
+            replaced = true;
+            break;
+        }
+    }
+
+    if !replaced {
+        headers.push((name.to_string(), value.to_string()));
+    }
+}
+
+pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
+    headers.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
+}
+
+pub fn resolve_redirect_target(base_url: &str, redirect_target: &str) -> Option<String> {
+    let trimmed = redirect_target.trim().trim_matches(|c| c == '"' || c == '\'' || c == '`');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = Url::parse(trimmed) {
+        return Some(parsed.to_string());
+    }
+
+    Url::parse(base_url)
+        .ok()
+        .and_then(|base| base.join(trimmed).ok())
+        .map(|url| url.to_string())
+}
+
+pub fn extract_js_redirect_target(body: &str) -> Option<String> {
+    if let Some(concat) = extract_concatenated_js_redirect_target(body) {
+        return Some(concat);
+    }
+
+    let patterns = [
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\[['"`]?href['"`]?\]\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\[['"`]?location['"`]?\](?:\[['"`]?href['"`]?\])?\s*=\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)window\.navigate\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)setTimeout\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
+        r#"(?is)setInterval\(\s*function\s*\(\)\s*\{\s*(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*;?\s*\}\s*,\s*\d+\s*\)"#,
+    ];
+
+    for pattern in patterns {
+        if let Ok(regex) = Regex::new(pattern) {
+            if let Some(captures) = regex.captures(body) {
+                if let Some(target) = captures.get(1) {
+                    return Some(target.as_str().to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_meta_refresh_target(body: &str) -> Option<String> {
+    let meta_pattern = r#"(?is)<meta[^>]+http-equiv=["'`]refresh["'`][^>]+content=["'`]\s*\d+\s*;\s*url=['"`]?([^"'`>]+)['"`]?\s*["'`][^>]*>"#;
+    if let Ok(regex) = Regex::new(meta_pattern) {
+        if let Some(captures) = regex.captures(body) {
+            if let Some(target) = captures.get(1) {
+                return Some(target.as_str().trim().to_string());
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_inline_event_redirect_target(body: &str) -> Option<String> {
+    let patterns = [
+        r#"(?is)<[^>]+\son\w+\s*=\s*"([^"]+)""#,
+        r#"(?is)<[^>]+\son\w+\s*=\s*'([^']+)'"#,
+    ];
+    for pattern in patterns {
+        let regex = Regex::new(pattern).ok()?;
+        for captures in regex.captures_iter(body) {
+            if let Some(raw) = captures.get(1) {
+                let chunk = raw.as_str();
+                if let Some(found) = extract_js_redirect_target(chunk) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_concatenated_js_redirect_target(body: &str) -> Option<String> {
+    let patterns = [
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\s*\+\s*["'`]([^"'`]+)["'`]"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location\.(?:assign|replace)\(\s*["'`]([^"'`]+)["'`]\s*\+\s*["'`]([^"'`]+)["'`]\s*\)"#,
+        r#"(?is)(?:window|document|self|top|parent)?\.?location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]\.concat\(\s*["'`]([^"'`]+)["'`]\s*\)"#,
+    ];
+
+    for pattern in patterns {
+        if let Ok(regex) = Regex::new(pattern) {
+            if let Some(captures) = regex.captures(body) {
+                let first = captures.get(1).map(|c| c.as_str()).unwrap_or("");
+                let second = captures.get(2).map(|c| c.as_str()).unwrap_or("");
+                let combined = format!("{}{}", first, second);
+                if !combined.is_empty() {
+                    return Some(combined);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_redirect_target(
+    base_url: &str,
+    headers: &[(String, String)],
+    response_body: Option<&str>,
+) -> Option<String> {
+    if let Some(location) = header_value(headers, "location") {
+        if let Some(resolved) = resolve_redirect_target(base_url, location) {
+            return Some(resolved);
+        }
+    }
+
+    response_body
+        .and_then(|body| {
+            extract_meta_refresh_target(body)
+                .or_else(|| extract_inline_event_redirect_target(body))
+                .or_else(|| extract_js_redirect_target(body))
+        })
+        .and_then(|target| resolve_redirect_target(base_url, &target))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_js_location_href_redirect() {
+        let body = r#"<script>window.location.href = "/dashboard";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/dashboard"));
+    }
+
+    #[test]
+    fn extracts_js_location_replace_redirect() {
+        let body = r#"<script>window.location.replace('https://example.com/login');</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("https://example.com/login"));
+    }
+
+    #[test]
+    fn resolves_relative_js_redirect_against_base_url() {
+        let headers = Vec::new();
+        let redirect = extract_redirect_target(
+            "https://example.com/app/index.html",
+            &headers,
+            Some(r#"<script>location.assign('../home');</script>"#),
+        );
+
+        assert_eq!(redirect.as_deref(), Some("https://example.com/home"));
+    }
+
+    #[test]
+    fn extracts_bracketed_location_redirect() {
+        let body = r#"<script>window.location['href'] = "/next";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/next"));
+    }
+
+    #[test]
+    fn extracts_settimeout_location_redirect() {
+        let body = r#"<script>setTimeout(function(){ location.href="/later"; }, 10);</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/later"));
+    }
+
+    #[test]
+    fn extracts_setinterval_location_redirect() {
+        let body = r#"<script>setInterval(function(){ parent.location="/soon"; }, 1000);</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/soon"));
+    }
+
+    #[test]
+    fn extracts_meta_refresh_redirect() {
+        let body = r#"<meta http-equiv="refresh" content="0; url=/meta-redirect">"#;
+        let target = extract_meta_refresh_target(body);
+        assert_eq!(target.as_deref(), Some("/meta-redirect"));
+    }
+
+    #[test]
+    fn extracts_quoted_meta_refresh_redirect() {
+        let body = r#"<meta http-equiv="refresh" content="0; url='/meta-quoted'">"#;
+        let target = extract_meta_refresh_target(body);
+        assert_eq!(target.as_deref(), Some("/meta-quoted"));
+    }
+
+    #[test]
+    fn extracts_inline_event_redirect() {
+        let body = r#"<body onload="document.location='/inline';"></body>"#;
+        let target = extract_inline_event_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/inline"));
+    }
+
+    #[test]
+    fn extracts_concatenated_redirect() {
+        let body = r#"<script>location.href = "/a" + "/b";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/a/b"));
+    }
+
+    #[test]
+    fn extracts_document_bracket_location_redirect() {
+        let body = r#"<script>document['location']['href']="/doc";</script>"#;
+        let target = extract_js_redirect_target(body);
+        assert_eq!(target.as_deref(), Some("/doc"));
+    }
+
+    #[test]
+    fn prefers_location_header_over_js_redirect() {
+        let headers = vec![("Location".to_string(), "/http-redirect".to_string())];
+
+        let redirect = extract_redirect_target(
+            "https://example.com/start",
+            &headers,
+            Some(r#"<script>window.location='/js-redirect';</script>"#),
+        );
+
+        assert_eq!(redirect.as_deref(), Some("https://example.com/http-redirect"));
+    }
+
+    #[test]
+    fn build_full_url_inserts_port_before_path() {
+        let url = build_full_url("http://127.0.0.1/index.html", 8001);
+        assert_eq!(url, "http://127.0.0.1:8001/index.html");
+    }
+}

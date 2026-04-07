@@ -1,6 +1,6 @@
 [package]
 name = "terminus"
-version = "2.12.0"
+version = "3.6.0"
 edition = "2021"
 description = "CLI tool for HTTP endpoint testing with HTTP/2 desync detection, security analysis, passive vulnerability detection, smart diffing, multi-threading, and enhanced reporting."
 license = "GPL-3.0"
@@ -11,8 +11,14 @@ repository = "https://github.com/gbiagomba/terminus"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-reqwest = { version = "0.13", features = ["blocking", "cookies", "http2"] }
-rayon = "1.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "cookies", "http2", "http3", "json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+async-trait = "0.1"
+url = "2"
+http = "1"
+sha2 = "0.10"
+hex = "0.4"
+rig-core = "0.33"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
@@ -23,5 +29,7 @@ regex = "1.12"
 rand = "0.10"
 rusqlite = { version = "0.38", features = ["bundled"] }
 chrono = "0.4"
+ratatui = "0.28"
+crossterm = "0.28"
 
 [build-dependencies]

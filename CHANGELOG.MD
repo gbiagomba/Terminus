@@ -5,6 +5,138 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-04-04
+
+### Added
+- **`--exploit` unified flag**: Comma-separated exploit modules — `xss`, `sqli`, `open_redirect`, `csrf`, `ssrf`, and more
+- **`--payloads` flag**: Load custom payloads from a user-supplied file (one per line); falls back to canned payloads
+- **XSS exploit module**: Injects payloads into query parameters, confirms reflection in response body
+- **SQLi exploit module**: Injects payloads into query parameters, detects database error indicators
+- **Open Redirect exploit module**: Injects redirect payloads, checks Location header for external hosts
+- **ratatui TUI for `interact`**: Full keyboard-navigable table UI with arrow keys, `/` search, `r` replay, `:open`, `:replay`, `:filter status`, `q` quit, and `?` help
+- **`:replay` command**: Re-sends selected HTTP request and shows response status + body snippet
+- **`--no-tui` flag** on `interact`: Falls back to classic REPL mode
+- **Expanded test coverage**: New tests across exploit payloads, diff detection, and transport sanitization
+
+### Changed
+- `interact` subcommand now launches TUI by default (use `--no-tui` for REPL mode)
+
+## [3.5.6] - 2026-04-04
+
+### Added
+- **Build Script Warning**: Emits a hint if `reqwest_unstable` is not set
+- **CI Check**: Added CI workflow with `RUSTFLAGS="--cfg reqwest_unstable"`
+
+### Changed
+- **Release Workflow**: Sets `RUSTFLAGS="--cfg reqwest_unstable"` during builds
+
+## [3.5.5] - 2026-04-04
+
+### Added
+- **Model List Output Files**: `--list-models-format json|csv` can write to `-o <base>`
+
+## [3.5.4] - 2026-04-04
+
+### Added
+- **Model List Output Formats**: `--list-models-format` supports `json` and `csv`
+- **Master Prompt Cleanup**: Master prompt file removed from repository and ignored
+
+## [3.5.3] - 2026-04-04
+
+### Added
+- **AI Strict JSON Mode**: `--strict-json` flag rejects partial outputs that do not match the schema
+- **AI Model Discovery**: `--list-models` for OpenAI-compatible, Gemini, and Ollama providers
+- **Redirect Heuristics**: Inline event handlers, `document['location']`, and concatenated URL literals
+
+## [3.5.2] - 2026-04-04
+
+### Added
+- **AI Provider Aliases**: Added `groq` and `ollama` provider shorthands via OpenAI-compatible endpoints
+- **AI Response Parsing**: Tolerant JSON sanitization for providers that wrap outputs in code fences
+
+## [3.5.1] - 2026-04-04
+
+### Added
+- **JS/HTML Redirect Detection**: Expanded heuristics for `location` assignments, `setTimeout`/`setInterval`, bracketed `location["href"]`, and meta refresh tags
+- **AI Mode Behavior**: Mode-specific objective shaping for prioritize/cluster/diff/validate/campaign workflows
+
+### Fixed
+- **Custom Port URLs**: Correctly inserts non-standard ports before URL paths (e.g., `http://host:8001/path`)
+
+## [3.5.0] - 2026-04-03
+
+### Added
+- **AI Subcommand**: Evidence-driven reasoning pipeline using the Rig provider abstraction
+- **AI Persistence**: Stores assessments into SQLite `ai_assessments` table
+
+## [3.4.0] - 2026-04-03
+
+### Added
+- **Enum Subcommand**: Subdomain and path enumeration with wordlists, wildcard suppression, filters, and multi-format output
+- **Diff Expansion**: JSON/SQLite diffing with richer change detection and export formats
+- **Help Manual**: Manual-style `terminus help` with per-subcommand guidance
+
+## [3.3.0] - 2026-04-03
+
+### Added
+- **SQLite Schema Versioning**: `schema_version` table with migration-aware initialization
+- **Evidence & Diff Tables**: New tables for evidence records, hypotheses, AI assessments, operator feedback, enumeration results, and diff results
+
+## [3.2.0] - 2026-04-03
+
+### Added
+- **Shared Output Rows**: Output pipeline now renders through a shared `OutputRow` model to support future subcommands
+
+### Changed
+- **Renderers**: Stdout/TXT/HTML/CSV now consume normalized output rows while JSON/SQLite preserve full scan schema
+
+## [3.1.0] - 2026-04-03
+
+### Added
+- **Async Transport Layer**: New transport abstraction with `Http12Transport` and `Http3Transport`
+- **HTTP/3 Support**: Real QUIC/HTTP/3 support when `--http-version 3` is selected
+- **Async Scan Engine**: Tokio-based request execution with async concurrency and rate limiting
+
+### Changed
+- **HTTP Version Control**: `--http-version` now accepts `3` / `3.0`
+- **Concurrency**: Scan execution moved from Rayon threads to async task concurrency
+- **Dependencies**: Removed reqwest blocking + Rayon; added Tokio + async-trait + HTTP/URL helpers
+
+### Notes
+- HTTP/3 requires HTTPS targets and does not support proxy configuration
+- reqwest HTTP/3 support is enabled via `--cfg reqwest_unstable` (set in `.cargo/config.toml`)
+
+## [3.0.0] - 2026-04-03
+
+### Added
+- **Subcommand CLI**: New top-level subcommands: `scan`, `diff`, `interact`, `help`, `enum`, `ai`
+- **Modular Scan Engine**: Scan logic moved into dedicated `src/scan/` modules
+- **Diff Subcommand**: JSON scan comparison via `terminus diff --base <FILE> --compare <FILE>`
+- **Interact Subcommand**: SQLite review via `terminus interact --db <FILE>`
+- **Shared Output and Storage**: Output formatting in `src/output/` and SQLite persistence in `src/storage/`
+
+### Changed
+- **Version**: Bumped from 2.13.0 to 3.0.0
+- **CLI Usage**: All scan operations now live under `terminus scan`
+
+### Notes
+- `help`, `enum`, and `ai` are wired as subcommands with placeholder messaging in this phase.
+
+## [2.13.0] - 2026-03-14
+
+### Added
+- **JavaScript Redirect Following**:
+  - `-L` now follows common JavaScript-triggered redirects in response bodies
+  - Supports `window.location`, `location.href`, `location.assign()`, `location.replace()`, and `window.navigate()`
+  - Resolves relative redirect targets against the current URL before issuing the next request
+
+### Changed
+- **Redirect Handling**: The existing manual redirect flow now handles both HTTP header redirects and body-driven JavaScript redirects
+- **Version**: Bumped from 2.12.0 to 2.13.0
+
+### Tests
+- Added unit coverage for JavaScript redirect extraction and relative URL resolution
+
 ## [2.12.0] - 2026-02-23
 
 ### Added
