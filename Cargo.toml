@@ -18,7 +18,7 @@ url = "2"
 http = "1"
 sha2 = "0.10"
 hex = "0.4"
-rig-core = "0.33"
+rig-core = "0.34"
 anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
@@ -30,6 +30,6 @@ rand = "0.10"
 rusqlite = { version = "0.39", features = ["bundled"] }
 chrono = "0.4"
 ratatui = "0.28"
-crossterm = "0.28"
+crossterm = "0.29"
 
 [build-dependencies]

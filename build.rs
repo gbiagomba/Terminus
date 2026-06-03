@@ -6,6 +6,6 @@ fn main() {
     let flags = if encoded.is_empty() { raw } else { encoded };
 
     if !flags.contains("reqwest_unstable") {
-        println!("cargo:warning=HTTP/3 requires RUSTFLAGS=\"--cfg reqwest_unstable\". This repo sets it in .cargo/config.toml.");
+        println!("cargo:warning=HTTP/3 requires RUSTFLAGS='--cfg reqwest_unstable'. Set in .cargo/config.toml, but a shell RUSTFLAGS env var will override it. Run: export RUSTFLAGS='--cfg reqwest_unstable'");
     }
 }
