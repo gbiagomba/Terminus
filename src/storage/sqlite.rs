@@ -7,7 +7,7 @@ use crate::r#enum::subdomains::EnumResult as SubdomainEnumResult;
 use crate::diff::DiffReport;
 use crate::ai::types::ReasoningResult;
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
     let filename = format!("{}.db", output_base.unwrap_or("terminus_results"));
@@ -41,6 +41,16 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
             http2_status_mismatch INTEGER DEFAULT 0,
             http2_response_diff TEXT,
             http2_issues TEXT,
+            crlf_desync_detected INTEGER,
+            crlf_cl_te INTEGER,
+            crlf_te_cl INTEGER,
+            crlf_zero_cl INTEGER,
+            crlf_expect_anomaly INTEGER,
+            crlf_malformed_version INTEGER,
+            crlf_injection_reflected INTEGER,
+            crlf_baseline_ms INTEGER,
+            crlf_max_probe_ms INTEGER,
+            crlf_issues TEXT,
             host_injection_suspected INTEGER DEFAULT 0,
             host_reflected_in_location INTEGER DEFAULT 0,
             host_reflected_in_vary INTEGER DEFAULT 0,
@@ -93,6 +103,7 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
             .unwrap_or((None, None, None));
 
         let http2 = result.http2_desync.as_ref();
+        let crlf = result.crlf_desync.as_ref();
         let host = result.host_injection.as_ref();
         let xff = result.xff_bypass.as_ref();
         let csrf = result.csrf_result.as_ref();
@@ -106,6 +117,9 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 reflection_detected,
                 http2_desync_detected, http2_http1_status, http2_http2_status,
                 http2_status_mismatch, http2_response_diff, http2_issues,
+                crlf_desync_detected, crlf_cl_te, crlf_te_cl, crlf_zero_cl,
+                crlf_expect_anomaly, crlf_malformed_version, crlf_injection_reflected,
+                crlf_baseline_ms, crlf_max_probe_ms, crlf_issues,
                 host_injection_suspected, host_reflected_in_location, host_reflected_in_vary,
                 host_reflected_in_set_cookie, host_injected_host, host_issues,
                 xff_bypass_suspected, xff_baseline_status, xff_xff_status,
@@ -116,8 +130,12 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 ssrf_response_indicators, ssrf_issues
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48
+                ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+                ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34,
+                ?35, ?36, ?37, ?38, ?39, ?40,
+                ?41, ?42, ?43, ?44, ?45, ?46,
+                ?47, ?48, ?49, ?50, ?51, ?52, ?53,
+                ?54, ?55, ?56, ?57, ?58
             )",
             params![
                 scan_timestamp,
@@ -144,6 +162,16 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 http2.map(|h| h.status_mismatch as i32),
                 http2.and_then(|h| h.response_diff.clone()),
                 http2.map(|h| serde_json::to_string(&h.issues).unwrap_or_default()),
+                crlf.map(|c| c.desync_detected as i32),
+                crlf.map(|c| c.cl_te_suspected as i32),
+                crlf.map(|c| c.te_cl_suspected as i32),
+                crlf.map(|c| c.zero_cl_suspected as i32),
+                crlf.map(|c| c.expect_anomaly as i32),
+                crlf.map(|c| c.malformed_version_anomaly as i32),
+                crlf.map(|c| c.crlf_injection_reflected as i32),
+                crlf.map(|c| c.baseline_ms as i64),
+                crlf.map(|c| c.max_probe_ms as i64),
+                crlf.map(|c| c.issues.join("; ")),
                 host.map(|h| h.injection_suspected as i32),
                 host.map(|h| h.reflected_in_location as i32),
                 host.map(|h| h.reflected_in_vary as i32),
@@ -273,12 +301,43 @@ fn ensure_sqlite_schema(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    create_evidence_tables(conn)?;
+
     let current_version = get_schema_version(conn)?;
-    if current_version < 2 {
-        create_evidence_tables(conn)?;
-        set_schema_version(conn, 2)?;
-    } else {
-        create_evidence_tables(conn)?;
+    if current_version < 3 {
+        add_crlf_columns_if_missing(conn)?;
+        set_schema_version(conn, SCHEMA_VERSION)?;
+    }
+
+    Ok(())
+}
+
+fn add_crlf_columns_if_missing(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
+    let existing: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .collect();
+
+    if existing.iter().any(|c| c == "crlf_desync_detected") {
+        return Ok(());
+    }
+
+    let crlf_columns = [
+        "crlf_desync_detected INTEGER",
+        "crlf_cl_te INTEGER",
+        "crlf_te_cl INTEGER",
+        "crlf_zero_cl INTEGER",
+        "crlf_expect_anomaly INTEGER",
+        "crlf_malformed_version INTEGER",
+        "crlf_injection_reflected INTEGER",
+        "crlf_baseline_ms INTEGER",
+        "crlf_max_probe_ms INTEGER",
+        "crlf_issues TEXT",
+    ];
+
+    for col in crlf_columns {
+        conn.execute(&format!("ALTER TABLE scan_results ADD COLUMN {}", col), [])?;
     }
 
     Ok(())

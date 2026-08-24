@@ -47,6 +47,7 @@ pub struct ScanResult {
     pub detected_errors: Option<Vec<String>>,
     pub reflection_detected: Option<bool>,
     pub http2_desync: Option<Http2DesyncResult>,
+    pub crlf_desync: Option<CrlfDesyncResult>,
     pub host_injection: Option<HostInjectionResult>,
     pub xff_bypass: Option<XffBypassResult>,
     pub csrf_result: Option<CsrfResult>,
@@ -62,6 +63,20 @@ pub struct Http2DesyncResult {
     pub http2_status: u16,
     pub status_mismatch: bool,
     pub response_diff: Option<String>,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CrlfDesyncResult {
+    pub desync_detected: bool,
+    pub cl_te_suspected: bool,
+    pub te_cl_suspected: bool,
+    pub zero_cl_suspected: bool,
+    pub expect_anomaly: bool,
+    pub malformed_version_anomaly: bool,
+    pub crlf_injection_reflected: bool,
+    pub baseline_ms: u64,
+    pub max_probe_ms: u64,
     pub issues: Vec<String>,
 }
 

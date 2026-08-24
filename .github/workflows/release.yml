@@ -127,7 +127,7 @@ jobs:
         generate_release_notes: true
 
     - name: Update latest release
-      if: github.ref == 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+      if: github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: latest
@@ -140,4 +140,5 @@ jobs:
 
           > Note: This is a pre-release build. For stable releases, see the versioned tags.
         prerelease: true
+        allow_updates: true
         files: release-files/*

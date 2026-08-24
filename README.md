@@ -130,6 +130,27 @@ export RUSTFLAGS="--cfg reqwest_unstable"
 
 ---
 
+### CRLF Desync / Request Smuggling detection
+
+- **`--crlf-desync-check`** — detect CRLF-powered request desync / HTTP request smuggling. Off by default. Also enabled via `--exploit smuggling` or `--scan-level vuln`.
+
+Terminus uses **safe, non-destructive** probes issued over its own connection (no queue poisoning of shared infrastructure):
+
+- **CL.TE / TE.CL / 0.CL timing probes** — measure whether ambiguous `Content-Length` / `Transfer-Encoding` framing causes back-end read stalls
+- **`Expect:` header anomaly** — flags unexpected `417 Expectation Failed` handling
+- **Malformed HTTP-version status probe** — sends a byte-exact malformed request line and inspects the status response
+- **CRLF header-injection reflection** — checks whether injected CRLF sequences are reflected in response headers
+
+Because `reqwest` normalizes CRLF and cannot emit the malformed bytes these checks require, this feature ships a dedicated **raw TCP+TLS transport** (`tokio-rustls` / `rustls` / `webpki-roots`) that writes byte-exact HTTP/1.1. Findings are recorded in a `CrlfDesyncResult` (with `desync_detected`, `cl_te_suspected`, `te_cl_suspected`, `zero_cl_suspected`, `expect_anomaly`, `malformed_version_anomaly`, `crlf_injection_reflected`, `baseline_ms`, `max_probe_ms`, and `issues`) and surfaced across JSON, HTML, CSV, and SQLite output (new `crlf_*` columns).
+
+> **Authorization warning**: these probes can disrupt proxies and affect other users on shared infrastructure. Only run against systems you are explicitly authorized to test. Reference: [PortSwigger — CRLF-powered desync attacks](https://portswigger.net/research/crlf-powered-desync-attacks).
+
+```bash
+terminus scan -u https://target --crlf-desync-check -o json
+```
+
+---
+
 ### Active Exploits
 
 Use `--exploit <module[,module]>` to run active exploit modules. Combine with `--payloads <file>` for custom payload lists (falls back to built-in payloads when omitted).
@@ -142,7 +163,7 @@ Use `--exploit <module[,module]>` to run active exploit modules. Combine with `-
 | `csrf` | Active CSRF protection checks |
 | `ssrf` | SSRF indicator detection via URL parameters |
 | `header` | Header injection payloads |
-| `smuggling` | HTTP request smuggling probes |
+| `smuggling` | CRLF desync / HTTP request smuggling probes (see [CRLF Desync detection](#crlf-desync--request-smuggling-detection)) |
 
 ```bash
 terminus scan -u https://target.com --exploit xss,sqli,open_redirect -k
@@ -243,6 +264,9 @@ terminus scan -f targets.txt \
 
 # Active exploit scan with custom payloads
 terminus scan -u https://target.com --exploit xss,sqli --payloads payloads.txt -k
+
+# CRLF desync / request smuggling detection (authorized targets only)
+terminus scan -u https://target --crlf-desync-check -o json
 
 # Subdomains + paths enumeration
 terminus enum subdomains -d target.com -w subdomains.txt

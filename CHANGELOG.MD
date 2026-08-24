@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-08-24
+
+### Added
+- **CRLF Desync / Request Smuggling detection**: New `--crlf-desync-check` flag on the `scan` subcommand (off by default) that detects CRLF-powered request desync / HTTP request smuggling. Also enabled via `--exploit smuggling` and `--scan-level vuln`.
+- **Safe, non-destructive probes**: All checks run over the tool's own connection with no queue poisoning of shared infrastructure — CL.TE / TE.CL / 0.CL timing probes, `Expect:` header anomaly (417) detection, malformed HTTP-version status probe, and CRLF header-injection reflection.
+- **Raw TCP+TLS transport**: New byte-exact HTTP/1.1 transport that emits malformed CRLF bytes `reqwest` cannot send (it normalizes CRLF). Powered by the new `tokio-rustls`, `rustls`, and `webpki-roots` dependencies.
+- **`CrlfDesyncResult`**: New result type (`desync_detected`, `cl_te_suspected`, `te_cl_suspected`, `zero_cl_suspected`, `expect_anomaly`, `malformed_version_anomaly`, `crlf_injection_reflected`, `baseline_ms`, `max_probe_ms`, `issues`) surfaced across JSON, HTML, CSV, and SQLite output (new `crlf_*` SQLite columns).
+
+### Security
+- CRLF desync probes can disrupt proxies and affect other users on shared infrastructure. Only run against systems you are explicitly authorized to test. Reference: https://portswigger.net/research/crlf-powered-desync-attacks
+
+### Dependencies
+- Added `tokio-rustls`, `rustls`, and `webpki-roots` for the raw TCP+TLS byte-exact HTTP/1.1 transport
+
 ## [3.6.0] - 2026-04-04
 
 ### Added

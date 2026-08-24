@@ -39,6 +39,7 @@ pub fn load_sqlite(path: &str) -> Result<Vec<ScanResult>> {
             detected_errors: parse_json_vec(detected_errors),
             reflection_detected: reflection_detected.map(|v| v != 0),
             http2_desync: None,
+            crlf_desync: None,
             host_injection: None,
             xff_bypass: None,
             csrf_result: None,

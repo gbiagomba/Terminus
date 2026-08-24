@@ -48,6 +48,7 @@ fn scan_subcommand() -> Command {
         .arg(Arg::new("detect-errors").long("detect-errors").help("Detect verbose error messages (SQL, stack traces, etc.)").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-reflection").long("detect-reflection").help("Check if input is reflected in response (passive XSS detection)").action(ArgAction::SetTrue))
         .arg(Arg::new("http2-desync-check").long("http2-desync-check").help("Test HTTP/2 to HTTP/1.1 downgrade handling (detects potential request smuggling)").action(ArgAction::SetTrue))
+        .arg(Arg::new("crlf-desync-check").long("crlf-desync-check").help("Detect CRLF-powered HTTP request desync/smuggling via safe timing/status/reflection probes. WARNING: only run against systems you are explicitly authorized to test; probes may disrupt proxies or affect other users on shared infrastructure.").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-host-injection").long("detect-host-injection").help("Passively detect Host header injection vulnerabilities by checking response headers").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-xff-bypass").long("detect-xff-bypass").help("Detect X-Forwarded-For bypass by comparing baseline and XFF requests").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))

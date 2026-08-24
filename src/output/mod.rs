@@ -54,6 +54,30 @@ pub fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
         }
     }
 
+    if let Some(ref crlf) = result.crlf_desync {
+        if crlf.desync_detected {
+            indicators.push("[CRLF Desync Suspected]".to_string());
+            if crlf.cl_te_suspected {
+                indicators.push("[CRLF: CL.TE]".to_string());
+            }
+            if crlf.te_cl_suspected {
+                indicators.push("[CRLF: TE.CL]".to_string());
+            }
+            if crlf.zero_cl_suspected {
+                indicators.push("[CRLF: 0.CL]".to_string());
+            }
+            if crlf.expect_anomaly {
+                indicators.push("[CRLF: Expect Anomaly]".to_string());
+            }
+            if crlf.malformed_version_anomaly {
+                indicators.push("[CRLF: Malformed Version]".to_string());
+            }
+            if crlf.crlf_injection_reflected {
+                indicators.push("[CRLF: Injection Reflected]".to_string());
+            }
+        }
+    }
+
     if let Some(ref host_inj) = result.host_injection {
         if host_inj.injection_suspected {
             indicators.push("[Host Injection Suspected]".to_string());
