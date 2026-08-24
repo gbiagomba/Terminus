@@ -61,10 +61,8 @@ pub fn analyze_security_headers(headers: &[(String, String)]) -> SecurityHeaders
                         issues.push(format!("Weak X-Frame-Options: {}", value));
                     }
                 }
-                "strict-transport-security" => {
-                    if !value.contains("max-age") {
-                        issues.push("HSTS missing max-age directive".to_string());
-                    }
+                "strict-transport-security" if !value.contains("max-age") => {
+                    issues.push("HSTS missing max-age directive".to_string());
                 }
                 _ => {}
             }
