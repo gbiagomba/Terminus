@@ -376,7 +376,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
 
     let mut scan_targets = Vec::new();
     for url in &urls {
-        let has_port = url.contains("://") && url.split("://").nth(1).map_or(false, |host_part| host_part.contains(':'));
+        let has_port = url.contains("://") && url.split("://").nth(1).is_some_and(|host_part| host_part.contains(':'));
         let is_https = url.starts_with("https://");
         let is_http = url.starts_with("http://");
 
@@ -444,7 +444,6 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
         let baseline_statuses = Arc::clone(&baseline_statuses);
         let transport = Arc::clone(&transport);
         let grep_pattern = grep_pattern.clone();
-        let random_delay_range = random_delay_range;
         let proxy_url = proxy_url.clone();
         let xss_payloads = xss_payloads.clone();
         let sqli_payloads = sqli_payloads.clone();
@@ -486,7 +485,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                     let mut method_confusion_suspected = None;
 
                     if is_arbitrary_method {
-                        if status >= 200 && status < 400 {
+                        if (200..400).contains(&status) {
                             arbitrary_method_accepted = Some(true);
                         } else {
                             arbitrary_method_accepted = Some(false);

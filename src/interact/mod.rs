@@ -253,7 +253,7 @@ pub fn run_interact_with_opts(db_path: &str, no_tui: bool) -> Result<()> {
 
             match row_result {
                 Ok(rows) => {
-                    print_table(&vec!["field".to_string(), "value".to_string()], &rows);
+                    print_table(&["field".to_string(), "value".to_string()], &rows);
                 }
                 Err(_) => {
                     println!("Scan ID not found.");
@@ -317,10 +317,8 @@ fn validate_terminus_db(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
     let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
     let mut col_set = HashSet::new();
-    for col in cols {
-        if let Ok(name) = col {
-            col_set.insert(name);
-        }
+    for name in cols.flatten() {
+        col_set.insert(name);
     }
 
     let required_columns = vec![

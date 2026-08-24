@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.2] - 2026-08-24
+
+### Changed
+- **Dependency upgrades** (`cargo update`/`upgrade`): `clap` 4.6, `regex` 1.13, `crossterm` 0.29, `rig-core` 0.34, plus transitive lockfile updates.
+
+### Fixed
+- **CI clippy gate**: Resolved all `cargo clippy -- -D warnings` lints (manual_flatten, useless_vec, redundant_locals, redundant_clone, needless map_or, consecutive str::replace) that were failing the CI pipeline.
+
 ## [3.7.1] - 2026-08-24
 
 ### Added

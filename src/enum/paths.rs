@@ -102,7 +102,6 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
                 let transport = Arc::clone(&transport);
                 let results = Arc::clone(&results);
                 let filter_status = filter_status.clone();
-                let wildcard_probe = wildcard_probe.clone();
                 let permit = semaphore.clone().acquire_owned().await?;
 
                 let handle = tokio::spawn(async move {

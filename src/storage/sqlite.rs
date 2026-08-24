@@ -285,12 +285,10 @@ fn ensure_sqlite_schema(conn: &Connection) -> Result<()> {
     let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
     let mut has_arbitrary_method = false;
 
-    for col in columns {
-        if let Ok(name) = col {
-            if name == "arbitrary_method_used" {
-                has_arbitrary_method = true;
-                break;
-            }
+    for name in columns.flatten() {
+        if name == "arbitrary_method_used" {
+            has_arbitrary_method = true;
+            break;
         }
     }
 

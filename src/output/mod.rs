@@ -504,8 +504,7 @@ fn html_escape(s: &str) -> String {
 fn csv_escape(s: &str) -> String {
     let cleaned = s
         .replace('\r', "")
-        .replace('\n', " ")
-        .replace('\t', " ")
+        .replace(['\n', '\t'], " ")
         .replace('\0', "");
 
     if cleaned.contains(',') || cleaned.contains('"') {

@@ -267,7 +267,7 @@ pub async fn run_tui(db_path: &str) -> Result<()> {
                                     app.status_bar = String::from("Keys: ↑↓ navigate | Enter detail | r replay | / search | :open <id> | :replay <id> | :filter status <code> | q quit");
                                 }
                                 _ => {
-                                    app.status_bar = format!("Unknown command");
+                                    app.status_bar = "Unknown command".to_string();
                                 }
                             }
                         }
