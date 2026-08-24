@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 - **Dependency upgrades** (`cargo update`/`upgrade`): `clap` 4.6, `regex` 1.13, `crossterm` 0.29, `rig-core` 0.34, plus transitive lockfile updates.
+- **Dependabot upgrades adopted in `dev`**: `quick-xml` 0.39 → 0.40, `sha2` 0.10 → 0.11, `ratatui` 0.28 → 0.30. Migrated the deprecated `Table::highlight_style` to `row_highlight_style` for ratatui 0.30. Supersedes the redundant `clap` 4.6.1, `log` 0.4.32, and `quinn-proto` 0.11.16 Dependabot PRs (dev already carries newer locked versions).
 
 ### Fixed
 - **CI clippy gate**: Resolved all `cargo clippy -- -D warnings` lints (manual_flatten, useless_vec, redundant_locals, redundant_clone, needless map_or, consecutive str::replace) that were failing the CI pipeline.

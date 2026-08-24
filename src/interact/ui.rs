@@ -171,7 +171,7 @@ pub async fn run_tui(db_path: &str) -> Result<()> {
                 app.filtered_rows.len(),
                 app.rows.len()
             )))
-            .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD));
+            .row_highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD));
 
             f.render_stateful_widget(table, chunks[0], &mut app.state);
 
