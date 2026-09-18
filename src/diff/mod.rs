@@ -233,6 +233,7 @@ mod tests {
             reflection_detected: None,
             http2_desync: None,
             crlf_desync: None,
+            malformed_verbs: None,
             host_injection: None,
             xff_bypass: None,
             csrf_result: None,

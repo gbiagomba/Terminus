@@ -40,6 +40,7 @@ pub fn load_sqlite(path: &str) -> Result<Vec<ScanResult>> {
             reflection_detected: reflection_detected.map(|v| v != 0),
             http2_desync: None,
             crlf_desync: None,
+            malformed_verbs: None,
             host_injection: None,
             xff_bypass: None,
             csrf_result: None,

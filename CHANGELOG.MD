@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-09-18
+
+### Added
+- **Malformed HTTP verb testing**: new `--malformed-verb-check` flag (also via `--exploit malformed` or `--scan-level vuln`). Sends deliberately malformed request methods (wrong case, leading/trailing/embedded space, tab, control char, null byte, non-token chars, overlong token) over the raw byte-exact socket, which `reqwest` cannot emit. Detects lax method parsing, case-insensitive method handling (method-ACL bypass risk), and hangs/resets. Surfaced as `MalformedVerbResult` across JSON/HTML/CSV/SQLite (new `malformed_verb_*` columns, schema v4).
+
+### Fixed
+- **CRLF/desync false positives** (from `docs/feedback/2026-09-18-crlf-desync-false-positives.md`, PASS-31703):
+  - CRLF injection reflection now flags only when the injected marker appears as a real response header (parsed header block), not when a framework merely echoes the percent-encoded path in an error body.
+  - Malformed HTTP-version probe no longer treats a clean `505/501/400` rejection as an anomaly; flags only silent acceptance (2xx) or a timing/socket anomaly.
+  - `Expect` probe no longer treats a clean `417` (or any status difference) as an anomaly; flags only a hang/reset/differential signal.
+  - HTTP/2 and HTTP/3 targets skip the CRLF response-splitting probe (structurally impossible over binary framing); any residual timing finding is caveated as "HTTP/1.1 downgrade path only".
+  - Security-header check flags "exposes version information" only when the `Server`/`X-Powered-By` value contains a version token; otherwise reports a softer "software disclosed (no version)" note.
+
 ## [3.7.2] - 2026-08-24
 
 ### Changed

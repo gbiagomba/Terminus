@@ -71,16 +71,32 @@ pub fn analyze_security_headers(headers: &[(String, String)]) -> SecurityHeaders
         }
     }
 
-    let problematic_headers = vec![
-        ("server", "Server header exposes version information"),
-        ("x-powered-by", "X-Powered-By header exposes technology stack"),
-        ("x-aspnet-version", "X-AspNet-Version header exposes framework version"),
-    ];
+    // A version token is two or more dot-separated numeric groups (e.g. 1.21.4)
+    // or at least a major.minor pair. Compiled once and reused below.
+    let version_pattern = Regex::new(r"\d+\.\d+").unwrap();
 
-    for (header_name, issue_desc) in problematic_headers {
-        if header_value(headers, header_name).is_some() {
-            issues.push(issue_desc.to_string());
+    // server / x-powered-by only "expose version information" when the value
+    // actually carries a version token. A bare software name (e.g. `openresty`)
+    // is a softer software-disclosure note, not a version leak.
+    if let Some(value) = header_value(headers, "server") {
+        if version_pattern.is_match(value) {
+            issues.push("Server header exposes version information".to_string());
+        } else {
+            issues.push("Server software disclosed (no version)".to_string());
         }
+    }
+
+    if let Some(value) = header_value(headers, "x-powered-by") {
+        if version_pattern.is_match(value) {
+            issues.push("X-Powered-By header exposes technology stack".to_string());
+        } else {
+            issues.push("Technology stack disclosed (no version)".to_string());
+        }
+    }
+
+    // x-aspnet-version is always a version string.
+    if header_value(headers, "x-aspnet-version").is_some() {
+        issues.push("X-AspNet-Version header exposes framework version".to_string());
     }
 
     if let Some(cors) = header_value(headers, "access-control-allow-origin") {
@@ -175,4 +191,45 @@ pub fn check_reflection(body: &str, marker: &str) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hdr(name: &str, value: &str) -> Vec<(String, String)> {
+        vec![(name.to_string(), value.to_string())]
+    }
+
+    #[test]
+    fn server_without_version_yields_soft_note() {
+        let result = analyze_security_headers(&hdr("Server", "openresty"));
+        assert!(result
+            .issues
+            .contains(&"Server software disclosed (no version)".to_string()));
+        assert!(!result
+            .issues
+            .iter()
+            .any(|i| i.contains("exposes version information")));
+    }
+
+    #[test]
+    fn server_with_version_yields_version_information_issue() {
+        let result = analyze_security_headers(&hdr("Server", "openresty/1.21.4"));
+        assert!(result
+            .issues
+            .contains(&"Server header exposes version information".to_string()));
+        assert!(!result
+            .issues
+            .iter()
+            .any(|i| i.contains("no version")));
+    }
+
+    #[test]
+    fn x_powered_by_without_version_yields_soft_note() {
+        let result = analyze_security_headers(&hdr("X-Powered-By", "Express"));
+        assert!(result
+            .issues
+            .contains(&"Technology stack disclosed (no version)".to_string()));
+    }
 }

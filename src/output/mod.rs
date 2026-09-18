@@ -78,6 +78,15 @@ pub fn collect_vuln_indicators(result: &ScanResult) -> Vec<String> {
         }
     }
 
+    if let Some(ref mv) = result.malformed_verbs {
+        if mv.malformed_accepted {
+            indicators.push("[Malformed Verb Accepted]".to_string());
+        }
+        if mv.case_insensitive_methods {
+            indicators.push("[Malformed Verb: Case-Insensitive]".to_string());
+        }
+    }
+
     if let Some(ref host_inj) = result.host_injection {
         if host_inj.injection_suspected {
             indicators.push("[Host Injection Suspected]".to_string());

@@ -7,7 +7,7 @@ use crate::r#enum::subdomains::EnumResult as SubdomainEnumResult;
 use crate::diff::DiffReport;
 use crate::ai::types::ReasoningResult;
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Result<()> {
     let filename = format!("{}.db", output_base.unwrap_or("terminus_results"));
@@ -51,6 +51,12 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
             crlf_baseline_ms INTEGER,
             crlf_max_probe_ms INTEGER,
             crlf_issues TEXT,
+            malformed_verb_accepted INTEGER,
+            malformed_verb_case_insensitive INTEGER,
+            malformed_verb_hang INTEGER,
+            malformed_verb_baseline_status INTEGER,
+            malformed_verb_samples TEXT,
+            malformed_verb_issues TEXT,
             host_injection_suspected INTEGER DEFAULT 0,
             host_reflected_in_location INTEGER DEFAULT 0,
             host_reflected_in_vary INTEGER DEFAULT 0,
@@ -104,6 +110,7 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
 
         let http2 = result.http2_desync.as_ref();
         let crlf = result.crlf_desync.as_ref();
+        let mv = result.malformed_verbs.as_ref();
         let host = result.host_injection.as_ref();
         let xff = result.xff_bypass.as_ref();
         let csrf = result.csrf_result.as_ref();
@@ -127,7 +134,9 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 csrf_suspected, csrf_accepts_without_origin, csrf_accepts_with_fake_origin,
                 csrf_missing_samesite, csrf_missing_x_frame_options, csrf_missing_csp, csrf_issues,
                 ssrf_suspected, ssrf_vulnerable_params, ssrf_tested_payloads,
-                ssrf_response_indicators, ssrf_issues
+                ssrf_response_indicators, ssrf_issues,
+                malformed_verb_accepted, malformed_verb_case_insensitive, malformed_verb_hang,
+                malformed_verb_baseline_status, malformed_verb_samples, malformed_verb_issues
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
@@ -135,7 +144,8 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 ?35, ?36, ?37, ?38, ?39, ?40,
                 ?41, ?42, ?43, ?44, ?45, ?46,
                 ?47, ?48, ?49, ?50, ?51, ?52, ?53,
-                ?54, ?55, ?56, ?57, ?58
+                ?54, ?55, ?56, ?57, ?58,
+                ?59, ?60, ?61, ?62, ?63, ?64
             )",
             params![
                 scan_timestamp,
@@ -196,6 +206,12 @@ pub fn output_sqlite(results: &[ScanResult], output_base: Option<&str>) -> Resul
                 ssrf.map(|s| serde_json::to_string(&s.tested_payloads).unwrap_or_default()),
                 ssrf.map(|s| serde_json::to_string(&s.response_indicators).unwrap_or_default()),
                 ssrf.map(|s| serde_json::to_string(&s.issues).unwrap_or_default()),
+                mv.map(|m| m.malformed_accepted as i32),
+                mv.map(|m| m.case_insensitive_methods as i32),
+                mv.map(|m| m.hang_or_reset as i32),
+                mv.map(|m| m.baseline_status as i32),
+                mv.map(|m| m.accepted_samples.join(", ")),
+                mv.map(|m| m.issues.join("; ")),
             ],
         )?;
     }
@@ -304,6 +320,11 @@ fn ensure_sqlite_schema(conn: &Connection) -> Result<()> {
     let current_version = get_schema_version(conn)?;
     if current_version < 3 {
         add_crlf_columns_if_missing(conn)?;
+    }
+    if current_version < 4 {
+        add_malformed_verb_columns_if_missing(conn)?;
+    }
+    if current_version < SCHEMA_VERSION {
         set_schema_version(conn, SCHEMA_VERSION)?;
     }
 
@@ -335,6 +356,33 @@ fn add_crlf_columns_if_missing(conn: &Connection) -> Result<()> {
     ];
 
     for col in crlf_columns {
+        conn.execute(&format!("ALTER TABLE scan_results ADD COLUMN {}", col), [])?;
+    }
+
+    Ok(())
+}
+
+fn add_malformed_verb_columns_if_missing(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(scan_results)")?;
+    let existing: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|c| c.ok())
+        .collect();
+
+    if existing.iter().any(|c| c == "malformed_verb_accepted") {
+        return Ok(());
+    }
+
+    let malformed_verb_columns = [
+        "malformed_verb_accepted INTEGER",
+        "malformed_verb_case_insensitive INTEGER",
+        "malformed_verb_hang INTEGER",
+        "malformed_verb_baseline_status INTEGER",
+        "malformed_verb_samples TEXT",
+        "malformed_verb_issues TEXT",
+    ];
+
+    for col in malformed_verb_columns {
         conn.execute(&format!("ALTER TABLE scan_results ADD COLUMN {}", col), [])?;
     }
 

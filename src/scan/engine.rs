@@ -113,6 +113,8 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let http2_desync_check = matches.get_flag("http2-desync-check") || preset_http2_desync_check;
     let crlf_desync_check = matches.get_flag("crlf-desync-check")
         || matches!(scan_level, Some("vuln"));
+    let malformed_verb_check = matches.get_flag("malformed-verb-check")
+        || matches!(scan_level, Some("vuln"));
     let detect_host_injection = matches.get_flag("detect-host-injection") || preset_detect_host_injection;
     let detect_xff_bypass = matches.get_flag("detect-xff-bypass") || preset_detect_xff_bypass;
     let detect_csrf = matches.get_flag("detect-csrf") || preset_detect_csrf;
@@ -133,6 +135,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let detect_csrf = detect_csrf || exploit_modules.contains("csrf");
     let detect_ssrf = detect_ssrf || exploit_modules.contains("ssrf");
     let crlf_desync_check = crlf_desync_check || exploit_modules.contains("smuggling");
+    let malformed_verb_check = malformed_verb_check || exploit_modules.contains("malformed");
     let detect_xss = exploit_modules.contains("xss");
     let detect_sqli = exploit_modules.contains("sqli");
     let detect_open_redirect = exploit_modules.contains("open_redirect");
@@ -593,10 +596,24 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                         None
                     };
 
+                    let negotiated_h2 =
+                        resp.version.contains("HTTP/2") || resp.version.contains("HTTP/3");
                     let crlf_desync = if crlf_desync_check && full_url.starts_with("http") {
                         Some(crate::scan::exploits::perform_crlf_desync_check(
                             &full_url,
                             &method,
+                            &custom_headers,
+                            allow_insecure,
+                            negotiated_h2,
+                            std::time::Duration::from_secs(10),
+                        ).await)
+                    } else {
+                        None
+                    };
+
+                    let malformed_verbs = if malformed_verb_check && full_url.starts_with("http") {
+                        Some(crate::scan::exploits::perform_malformed_verb_check(
+                            &full_url,
                             &custom_headers,
                             allow_insecure,
                             std::time::Duration::from_secs(10),
@@ -706,6 +723,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                                 reflection_detected,
                                 http2_desync: http2_desync.clone(),
                                 crlf_desync: crlf_desync.clone(),
+                                malformed_verbs: malformed_verbs.clone(),
                                 host_injection: host_injection.clone(),
                                 xff_bypass: xff_bypass.clone(),
                                 csrf_result: csrf_result.clone(),
@@ -749,6 +767,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                             reflection_detected,
                             http2_desync,
                             crlf_desync,
+                            malformed_verbs,
                             host_injection,
                             xff_bypass,
                             csrf_result,
@@ -807,6 +826,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                                         reflection_detected: None,
                                         http2_desync: None,
                                         crlf_desync: None,
+                                        malformed_verbs: None,
                                         host_injection: None,
                                         xff_bypass: None,
                                         csrf_result: None,
@@ -853,6 +873,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                         reflection_detected: None,
                         http2_desync: None,
                         crlf_desync: None,
+                        malformed_verbs: None,
                         host_injection: None,
                         xff_bypass: None,
                         csrf_result: None,

@@ -48,6 +48,7 @@ pub struct ScanResult {
     pub reflection_detected: Option<bool>,
     pub http2_desync: Option<Http2DesyncResult>,
     pub crlf_desync: Option<CrlfDesyncResult>,
+    pub malformed_verbs: Option<MalformedVerbResult>,
     pub host_injection: Option<HostInjectionResult>,
     pub xff_bypass: Option<XffBypassResult>,
     pub csrf_result: Option<CsrfResult>,
@@ -77,6 +78,16 @@ pub struct CrlfDesyncResult {
     pub crlf_injection_reflected: bool,
     pub baseline_ms: u64,
     pub max_probe_ms: u64,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MalformedVerbResult {
+    pub malformed_accepted: bool,
+    pub case_insensitive_methods: bool,
+    pub hang_or_reset: bool,
+    pub baseline_status: u16,
+    pub accepted_samples: Vec<String>,
     pub issues: Vec<String>,
 }
 

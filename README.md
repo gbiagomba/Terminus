@@ -139,9 +139,21 @@ Terminus uses **safe, non-destructive** probes issued over its own connection (n
 - **CL.TE / TE.CL / 0.CL timing probes** — measure whether ambiguous `Content-Length` / `Transfer-Encoding` framing causes back-end read stalls
 - **`Expect:` header anomaly** — flags unexpected `417 Expectation Failed` handling
 - **Malformed HTTP-version status probe** — sends a byte-exact malformed request line and inspects the status response
-- **CRLF header-injection reflection** — checks whether injected CRLF sequences are reflected in response headers
+- **CRLF header-injection reflection**: flags only when the injected marker appears as an actual response header (header block parsed), not when a framework merely echoes the encoded path in an error body
 
 Because `reqwest` normalizes CRLF and cannot emit the malformed bytes these checks require, this feature ships a dedicated **raw TCP+TLS transport** (`tokio-rustls` / `rustls` / `webpki-roots`) that writes byte-exact HTTP/1.1. Findings are recorded in a `CrlfDesyncResult` (with `desync_detected`, `cl_te_suspected`, `te_cl_suspected`, `zero_cl_suspected`, `expect_anomaly`, `malformed_version_anomaly`, `crlf_injection_reflected`, `baseline_ms`, `max_probe_ms`, and `issues`) and surfaced across JSON, HTML, CSV, and SQLite output (new `crlf_*` columns).
+
+> **Heuristic notes (v3.8.0):** a clean rejection (`505` to a malformed version, `417` to an unsupported `Expect`) is treated as correct behavior and no longer flagged. When the target negotiates **HTTP/2 or HTTP/3**, the CRLF response-splitting probe is skipped (structurally impossible over binary framing) and any residual timing finding is labeled "HTTP/1.1 downgrade path only".
+
+### Malformed HTTP verb testing
+
+- **`--malformed-verb-check`**: send deliberately malformed request methods over the raw socket. Off by default. Also enabled via `--exploit malformed` or `--scan-level vuln`.
+
+Payloads (`reqwest` sanitizes these away, so they require the raw transport): wrong case (`get`, `gEt`), leading/trailing/embedded space, tab, control char, null byte, non-token chars (`GET;`, `GET/`, `GET()`), overlong token. Detects a server that **accepts** a malformed method (2xx/3xx), handles methods **case-insensitively** (method-ACL bypass risk), or **hangs/resets**. A clean `400/501/505` rejection is not flagged. Results land in a `MalformedVerbResult` (`malformed_accepted`, `case_insensitive_methods`, `hang_or_reset`, `baseline_status`, `accepted_samples`, `issues`) and the SQLite `malformed_verb_*` columns.
+
+```bash
+terminus scan -u https://target --malformed-verb-check -o json
+```
 
 > **Authorization warning**: these probes can disrupt proxies and affect other users on shared infrastructure. Only run against systems you are explicitly authorized to test. Reference: [PortSwigger — CRLF-powered desync attacks](https://portswigger.net/research/crlf-powered-desync-attacks).
 
@@ -164,6 +176,7 @@ Use `--exploit <module[,module]>` to run active exploit modules. Combine with `-
 | `ssrf` | SSRF indicator detection via URL parameters |
 | `header` | Header injection payloads |
 | `smuggling` | CRLF desync / HTTP request smuggling probes (see [CRLF Desync detection](#crlf-desync--request-smuggling-detection)) |
+| `malformed` | Malformed HTTP verb probes (see [Malformed HTTP verb testing](#malformed-http-verb-testing)) |
 
 ```bash
 terminus scan -u https://target.com --exploit xss,sqli,open_redirect -k

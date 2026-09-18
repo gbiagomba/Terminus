@@ -35,6 +35,13 @@ test_output.html
 *.sqlite-wal
 *.sqlite-shm
 
+# Scan run artifacts
+terminus-desync-*.json
+terminus-desync-*.txt
+terminus-desync-*.csv
+terminus-desync-*.db
+terminus-desync-*.html
+
 # macOS files
 .DS_Store
 .AppleDouble
