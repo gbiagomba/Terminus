@@ -60,7 +60,7 @@ fn scan_subcommand() -> Command {
         .arg(Arg::new("detect-csrf").long("detect-csrf").help("Passively detect potential CSRF vulnerabilities and missing protections").action(ArgAction::SetTrue))
         .arg(Arg::new("detect-ssrf").long("detect-ssrf").help("Passively detect potential SSRF vulnerabilities in URL parameters").action(ArgAction::SetTrue))
         .arg(Arg::new("scan-level").long("scan-level").value_name("LEVEL").help("Scan preset level: quick (basic), standard (security headers+errors+reflection), full (all features), vuln (all vulnerability detection)"))
-        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").default_value("10").help("Number of concurrent threads for scanning"))
+        .arg(Arg::new("threads").short('t').long("threads").value_name("NUM").help("Max concurrent requests. Default: auto, the logical CPU core count clamped to [10, 64]. Set this explicitly to override the cap (any value is honored)"))
         .arg(Arg::new("exploit").long("exploit").value_name("MODULES").help("Comma-separated exploit modules to run: header,csrf,ssrf,open_redirect,smuggling,xss,sqli"))
         .arg(Arg::new("payloads").long("payloads").value_name("FILE").help("Path to file with custom payloads (one per line)"))
 }

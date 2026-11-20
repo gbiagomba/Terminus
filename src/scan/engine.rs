@@ -25,8 +25,8 @@ use crate::scan::exploits::{
 use crate::scan::exploits::payloads::{load_payloads_from_file, OPEN_REDIRECT_PAYLOADS, SQLI_PAYLOADS, XSS_PAYLOADS};
 use crate::scan::curl::parse_curl;
 use crate::scan::http::{
-    authority_has_port, build_full_url, extract_redirect_target, flatten_headers, header_value,
-    normalize_method, parse_header,
+    authority_has_port, build_full_url, clamp_thread_count, extract_redirect_target,
+    flatten_headers, header_value, normalize_method, parse_header, THREAD_FLOOR,
 };
 use crate::scan::input::{parse_input_file, read_lines, read_stdin};
 use crate::scan::{ARBITRARY_HTTP_METHODS, HTTP_METHODS};
@@ -108,9 +108,22 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
         .or_else(|| curl.as_ref().and_then(|c| c.data.clone()))
         .map(String::into_bytes);
 
-    let thread_count: usize = matches.get_one::<String>("threads")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10);
+    // Explicit -t is honored exactly (any value, no cap). With no -t (or an
+    // unparseable/zero value), auto-size to the logical core count clamped to
+    // [10, 64]. available_parallelism is container/affinity aware.
+    let thread_count: usize = matches
+        .get_one::<String>("threads")
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or_else(|| {
+            let cores = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(THREAD_FLOOR);
+            clamp_thread_count(cores)
+        });
+    if verbose {
+        eprintln!("[*] Concurrency: {} concurrent requests", thread_count);
+    }
 
     let scan_level = matches.get_one::<String>("scan-level").map(|s| s.as_str());
 

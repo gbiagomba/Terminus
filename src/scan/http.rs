@@ -3,6 +3,17 @@ use std::str::FromStr;
 use url::Url;
 use http::header::{HeaderName, HeaderValue};
 
+/// Default concurrency floor and ceiling for auto-detected `--threads`.
+pub const THREAD_FLOOR: usize = 10;
+pub const THREAD_CEILING: usize = 64;
+
+/// Clamp a logical-core count into the auto `--threads` range. Keeps the default
+/// at or above the historical 10 on small machines and caps it on large ones so
+/// an auto run stays polite to the target. An explicit `-t` bypasses this.
+pub fn clamp_thread_count(cores: usize) -> usize {
+    cores.clamp(THREAD_FLOOR, THREAD_CEILING)
+}
+
 /// True only when the URL's authority (`host[:port]`) carries an explicit port.
 /// Colons in the path, query, or fragment do not count (for example a URN such
 /// as `urn:aaid:sc:US:...` sitting in the path), userinfo colons are ignored,
@@ -232,6 +243,16 @@ pub fn extract_redirect_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clamp_thread_count_floor_and_ceiling() {
+        assert_eq!(clamp_thread_count(1), 10); // below floor stays 10
+        assert_eq!(clamp_thread_count(4), 10); // 4-core laptop not slower than today
+        assert_eq!(clamp_thread_count(10), 10);
+        assert_eq!(clamp_thread_count(18), 18); // scales with cores
+        assert_eq!(clamp_thread_count(64), 64);
+        assert_eq!(clamp_thread_count(128), 64); // capped
+    }
 
     #[test]
     fn authority_has_port_ignores_non_authority_colons() {

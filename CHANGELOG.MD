@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] - 2026-11-20
+
+### Changed
+- **Auto-sized default concurrency**: with no `-t/--threads`, the number of concurrent requests now defaults to the logical CPU core count clamped to `[10, 64]` (via `std::thread::available_parallelism`, so it respects container CPU limits) instead of a fixed `10`. This never drops below the old default on small machines and scales up on larger ones, while the cap keeps an automatic run polite to the target. `--threads` is an I/O concurrency limit (a `Semaphore` on in-flight requests), not a CPU-thread count. An explicit `-t` is honored exactly with no cap (for example `-t 200`); `-t 0` or an unparseable value falls back to the auto default. Verbose mode prints the chosen concurrency.
+
 ## [3.9.1] - 2026-11-20
 
 ### Fixed

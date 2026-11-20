@@ -101,7 +101,7 @@ export RUSTFLAGS="--cfg reqwest_unstable"
 - **HTTP methods**: `-X <METHOD>` or `-X ALL` to test all predefined methods
 - **Ports**: `-p 80,443,8080` (defaults to 80 + 443; file inputs use embedded ports automatically)
 - **Protocol version**: `--http-version 1.0|1.1|2|3`
-- **Concurrency**: `-t <N>` async tasks (default: 10)
+- **Concurrency**: `-t <N>` max concurrent requests. Default is auto: the logical CPU core count clamped to [10, 64] (container aware). Set `-t` explicitly to override the cap (any value is honored; `-t 200` runs 200 in flight)
 - **Proxy**: `-x http://127.0.0.1:8080` (Burp Suite, etc.)
 - **TLS**: `-k` to allow insecure connections
 - **Headers**: `-H "Name: Value"` (repeatable) or `--header-file`
