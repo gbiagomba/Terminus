@@ -3,6 +3,30 @@ use std::str::FromStr;
 use url::Url;
 use http::header::{HeaderName, HeaderValue};
 
+/// True only when the URL's authority (`host[:port]`) carries an explicit port.
+/// Colons in the path, query, or fragment do not count (for example a URN such
+/// as `urn:aaid:sc:US:...` sitting in the path), userinfo colons are ignored,
+/// and an IPv6 literal's inner colons are handled via its bracket form.
+pub fn authority_has_port(url: &str) -> bool {
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    // Drop any userinfo (user:pass@host) so its colon does not count as a port.
+    let hostport = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    match hostport.strip_prefix('[') {
+        // IPv6 literal: a port exists only as `]:port` after the closing bracket.
+        Some(rest) => rest
+            .split_once(']')
+            .is_some_and(|(_, tail)| tail.starts_with(':')),
+        None => hostport.contains(':'),
+    }
+}
+
 pub fn build_full_url(url: &str, port: u16) -> String {
     if let Ok(mut parsed) = Url::parse(url) {
         if parsed.port().is_some() {
@@ -208,6 +232,23 @@ pub fn extract_redirect_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authority_has_port_ignores_non_authority_colons() {
+        // Colons in the path (a URN) must NOT be read as a port.
+        assert!(!authority_has_port(
+            "https://express-stage.adobe.com/id/urn:aaid:sc:US:58272c63?pageId=x&learn=y"
+        ));
+        assert!(!authority_has_port("http://example.com/a:b"));
+        assert!(!authority_has_port("http://user:pass@example.com/urn:x"));
+        assert!(!authority_has_port("http://[::1]/path"));
+        assert!(!authority_has_port("example.com/urn:x"));
+        // Real explicit ports must still be detected.
+        assert!(authority_has_port("https://example.com:8443/path"));
+        assert!(authority_has_port("http://user:pass@example.com:8080/"));
+        assert!(authority_has_port("http://[::1]:8080/"));
+        assert!(authority_has_port("example.com:9000"));
+    }
 
     #[test]
     fn extracts_js_location_href_redirect() {

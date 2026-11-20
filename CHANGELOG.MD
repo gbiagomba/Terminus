@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.1] - 2026-11-20
+
+### Fixed
+- **Port misdetection on URLs with colons in the path**: the port heuristic treated any colon after `://` as a `host:port` separator, so a URL whose path contains colons (for example a URN like `urn:aaid:sc:US:...`) was read as having an explicit port and scanned on port `0`, making every request fail with "Request failed". Port detection now inspects only the authority (`host[:port]`), ignoring colons in the path, query, fragment, and userinfo, and handling IPv6 literals via their bracket form. New `authority_has_port` helper in `src/scan/http.rs` with unit tests.
+
 ## [3.9.0] - 2026-11-20
 
 ### Added

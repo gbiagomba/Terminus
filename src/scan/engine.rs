@@ -25,8 +25,8 @@ use crate::scan::exploits::{
 use crate::scan::exploits::payloads::{load_payloads_from_file, OPEN_REDIRECT_PAYLOADS, SQLI_PAYLOADS, XSS_PAYLOADS};
 use crate::scan::curl::parse_curl;
 use crate::scan::http::{
-    build_full_url, extract_redirect_target, flatten_headers, header_value, normalize_method,
-    parse_header,
+    authority_has_port, build_full_url, extract_redirect_target, flatten_headers, header_value,
+    normalize_method, parse_header,
 };
 use crate::scan::input::{parse_input_file, read_lines, read_stdin};
 use crate::scan::{ARBITRARY_HTTP_METHODS, HTTP_METHODS};
@@ -438,7 +438,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
 
     let mut scan_targets = Vec::new();
     for url in &urls {
-        let has_port = url.contains("://") && url.split("://").nth(1).is_some_and(|host_part| host_part.contains(':'));
+        let has_port = authority_has_port(url);
         let is_https = url.starts_with("https://");
         let is_http = url.starts_with("http://");
 

@@ -39,5 +39,5 @@ ENTRYPOINT ["./terminus"]
 
 # Add metadata
 LABEL maintainer="Gilles Biagomba <gilles.infosec@gmail.com>"
-LABEL version="3.9.0"
+LABEL version="3.9.1"
 LABEL description="CLI tool for HTTP endpoint testing with HTTP/2 desync detection, CRLF-powered request-smuggling detection, security analysis, passive vulnerability detection, smart diffing, multi-threading, and enhanced reporting."
