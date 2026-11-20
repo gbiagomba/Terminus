@@ -106,6 +106,8 @@ export RUSTFLAGS="--cfg reqwest_unstable"
 - **TLS**: `-k` to allow insecure connections
 - **Headers**: `-H "Name: Value"` (repeatable) or `--header-file`
 - **Cookies**: `-b "name=val"` or `-c/--cookie-file`
+- **Request body**: `-d/--data '<body>'` (curl-faithful aliases `--data-binary`, `--data-raw`, `--data-ascii`). A body implies `POST` unless `-X` is given, and adds `Content-Type: application/x-www-form-urlencoded` when no `Content-Type` header is supplied. Example: `terminus scan -u https://host/api -d 'a=1&b=2'`
+- **From curl**: `--from-curl "curl ..."` seeds the URL, method, headers, cookies, and body from a pasted `curl` command (for example a browser's "Copy as cURL"). Explicit flags override the parsed values. Example: `terminus scan --from-curl "curl -X PUT -H 'X-Test: 1' -d '{\"k\":1}' https://host/api"`. Pasted-curl proxy (`-x`) and basic-auth (`-u`) are intentionally dropped; use Terminus's own `--proxy` and headers.
 - **Redirects**: `-L` follows HTTP `Location` and JavaScript-triggered redirects (`window.location`, `location.href`, `location.assign()`, `location.replace()`, meta refresh)
 - **Rate limiting**: `--rate-limit 10/s` or `100/m`; `--random-delay 1-5` for random gaps
 - **Verbose**: `-v` shows full response headers

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-11-20
+
+### Added
+- **Request body (`-d`/`--data`)**: send a body with scan requests, with the curl-faithful aliases `--data-binary`, `--data-raw`, and `--data-ascii`. A body with no explicit `-X` implies `POST`; a body with no caller-supplied `Content-Type` gets `application/x-www-form-urlencoded` (curl's default). An explicit `-X` or `Content-Type` header always wins. The body flows through both the reqwest and raw byte-exact transports.
+- **`--from-curl`**: parse a pasted `curl ...` command line (for example a browser's "Copy as cURL") and populate the URL, method, headers, cookies, and body. Explicit Terminus flags override the parsed values. Tokenized with `shlex`; understands `-X/--request`, `-H/--header`, `-d/--data/--data-binary/--data-raw/--data-ascii`, `-b/--cookie`, `-e/--referer`, `-A/--user-agent`, `-k/--insecure`, and `--url`; value-taking flags such as `-x/--proxy`, `-o`, `-u/--user` are consumed so they cannot be mistaken for the endpoint. Pasted-curl proxy and basic-auth are intentionally dropped (use `--proxy` and headers). New module `src/scan/curl.rs` with 6 unit tests. New dependency: `shlex`.
+
 ## [3.8.0] - 2026-09-18
 
 ### Added

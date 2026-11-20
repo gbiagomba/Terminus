@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod curl;
 pub mod engine;
 pub mod exploits;
 pub mod http;

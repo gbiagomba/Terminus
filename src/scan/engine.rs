@@ -23,8 +23,10 @@ use crate::scan::exploits::{
     perform_xff_bypass_check, perform_xss_check,
 };
 use crate::scan::exploits::payloads::{load_payloads_from_file, OPEN_REDIRECT_PAYLOADS, SQLI_PAYLOADS, XSS_PAYLOADS};
+use crate::scan::curl::parse_curl;
 use crate::scan::http::{
-    build_full_url, extract_redirect_target, flatten_headers, normalize_method, parse_header,
+    build_full_url, extract_redirect_target, flatten_headers, header_value, normalize_method,
+    parse_header,
 };
 use crate::scan::input::{parse_input_file, read_lines, read_stdin};
 use crate::scan::{ARBITRARY_HTTP_METHODS, HTTP_METHODS};
@@ -72,12 +74,17 @@ impl RateLimiter {
     }
 }
 
-fn build_request(url: &str, method: &str, headers: &[(String, String)]) -> TerminusRequest {
+fn build_request(
+    url: &str,
+    method: &str,
+    headers: &[(String, String)],
+    body: Option<Vec<u8>>,
+) -> TerminusRequest {
     TerminusRequest {
         url: url.to_string(),
         method: method.to_string(),
         headers: headers.to_vec(),
-        body: None,
+        body,
         timeout: None,
         version: None,
     }
@@ -85,8 +92,21 @@ fn build_request(url: &str, method: &str, headers: &[(String, String)]) -> Termi
 
 pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
     let verbose = matches.get_flag("verbose");
-    let allow_insecure = matches.get_flag("insecure");
+    let curl = matches
+        .get_one::<String>("from-curl")
+        .map(|line| parse_curl(line))
+        .transpose()?;
+    let allow_insecure =
+        matches.get_flag("insecure") || curl.as_ref().map(|c| c.insecure).unwrap_or(false);
     let follow_redirects = matches.get_flag("follow");
+
+    // Request body from -d/--data (and curl-faithful aliases), falling back to a
+    // --from-curl body. First explicit flag wins; order matches curl precedence.
+    let body: Option<Vec<u8>> = ["data", "data-binary", "data-raw", "data-ascii"]
+        .iter()
+        .find_map(|key| matches.get_one::<String>(key).cloned())
+        .or_else(|| curl.as_ref().and_then(|c| c.data.clone()))
+        .map(String::into_bytes);
 
     let thread_count: usize = matches.get_one::<String>("threads")
         .and_then(|s| s.parse().ok())
@@ -237,6 +257,8 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
 
     let urls = if let Some(url) = matches.get_one::<String>("url") {
         vec![url.to_string()]
+    } else if let Some(curl_url) = curl.as_ref().and_then(|c| c.url.clone()) {
+        vec![curl_url]
     } else if let Some(file) = matches.get_one::<String>("file") {
         parse_input_file(file, ipv6_enabled)?
     } else if !io::stdin().is_terminal() {
@@ -264,6 +286,15 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                 arbitrary_methods.insert(method_upper);
             }
         }
+    } else if let Some(curl_method) = curl.as_ref().and_then(|c| c.method.clone()) {
+        let method_upper = normalize_method(&curl_method);
+        methods_set.insert(method_upper.clone());
+        if !standard_methods.contains(&method_upper) {
+            arbitrary_methods.insert(method_upper);
+        }
+    } else if body.is_some() {
+        // A request body with no explicit method implies POST (curl-faithful).
+        methods_set.insert("POST".to_string());
     } else {
         methods_set.insert("GET".to_string());
     }
@@ -348,10 +379,29 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
         }
     }
 
+    // Merge --from-curl headers (and curl -A/-e) after explicit -H/--header-file.
+    if let Some(c) = curl.as_ref() {
+        for (key, value) in &c.headers {
+            custom_headers.push((key.clone(), value.clone()));
+        }
+        if let Some(ua) = &c.user_agent {
+            if header_value(&custom_headers, "User-Agent").is_none() {
+                custom_headers.push(("User-Agent".to_string(), ua.clone()));
+            }
+        }
+        if let Some(referer) = &c.referer {
+            if header_value(&custom_headers, "Referer").is_none() {
+                custom_headers.push(("Referer".to_string(), referer.clone()));
+            }
+        }
+    }
+
     let mut cookie_string = String::new();
 
     if let Some(cookie) = matches.get_one::<String>("cookie") {
         cookie_string = cookie.clone();
+    } else if let Some(curl_cookie) = curl.as_ref().and_then(|c| c.cookie.clone()) {
+        cookie_string = curl_cookie;
     }
 
     if let Some(cookie_file) = matches.get_one::<String>("cookie-file") {
@@ -371,6 +421,15 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
 
     if !cookie_string.is_empty() {
         custom_headers.push(("Cookie".to_string(), cookie_string));
+    }
+
+    // curl-faithful default: a body with no explicit Content-Type gets the
+    // urlencoded form type. Never overrides a caller-supplied Content-Type.
+    if body.is_some() && header_value(&custom_headers, "Content-Type").is_none() {
+        custom_headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
     }
 
     if crlf_desync_check {
@@ -418,7 +477,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                 sleep(Duration::from_secs(delay)).await;
             }
 
-            let request = build_request(full_url, "GET", &custom_headers);
+            let request = build_request(full_url, "GET", &custom_headers, body.clone());
             let status = transport.send(request).await.map(|resp| resp.status).unwrap_or(0);
 
             baseline_statuses.insert(full_url.clone(), status);
@@ -443,6 +502,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
         let rate_limiter = Arc::clone(&rate_limiter);
         let results = Arc::clone(&results);
         let custom_headers = custom_headers.clone();
+        let body = body.clone();
         let arbitrary_methods = Arc::clone(&arbitrary_methods);
         let baseline_statuses = Arc::clone(&baseline_statuses);
         let transport = Arc::clone(&transport);
@@ -473,7 +533,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                 None
             };
 
-            let request = build_request(&full_url, &method, &custom_headers);
+            let request = build_request(&full_url, &method, &custom_headers, body.clone());
 
             match transport.send(request).await {
                 Ok(resp) => {
@@ -791,7 +851,7 @@ pub async fn run_scan(matches: &ArgMatches) -> Result<()> {
                                 break;
                             };
 
-                            let request = build_request(&next_url, &method, &custom_headers);
+                            let request = build_request(&next_url, &method, &custom_headers, body.clone());
 
                             match transport.send(request).await {
                                 Ok(redirect_resp) => {
