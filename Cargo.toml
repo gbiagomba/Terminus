@@ -15,7 +15,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "c
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }
 tokio-rustls = "0.26"
 rustls = "0.23"
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 async-trait = "0.1"
 url = "2"
 http = "1"
